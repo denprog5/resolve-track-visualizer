@@ -163,6 +163,7 @@ jobs:
             syft_archive: syft_1.42.3_windows_amd64.zip
             syft_sha256: e1b9f4945aa64c2b34970bec617623d7f803d0661b48a50b966768b363322e2d
             syft_member: syft.exe
+            sbom_python: python
           - target: linux-x64
             display_name: Linux x64
             runner: ubuntu-24.04
@@ -174,6 +175,7 @@ jobs:
             syft_archive: syft_1.42.3_linux_amd64.tar.gz
             syft_sha256: 0d6be741479eddd2c8644a288990c04f3df0d609bbc1599a005532a9dff63509
             syft_member: syft
+            sbom_python: /opt/python/cp312-cp312/bin/python
           - target: macos-arm64
             display_name: macOS arm64
             runner: macos-15
@@ -185,6 +187,7 @@ jobs:
             syft_archive: syft_1.42.3_darwin_arm64.tar.gz
             syft_sha256: d71ee7db2be0fe2e96f679fd9d69ef04274cc86c8604707797080a21070b3f32
             syft_member: syft
+            sbom_python: python
           - target: macos-x64
             display_name: macOS Intel
             runner: macos-15-intel
@@ -196,6 +199,7 @@ jobs:
             syft_archive: syft_1.42.3_darwin_amd64.tar.gz
             syft_sha256: c00d01b7c43504708c8922d643d1cbaefa62ca8876baa4d2c2cf4c3be43707a9
             syft_member: syft
+            sbom_python: python
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container_image }}
     timeout-minutes: 75
@@ -428,7 +432,7 @@ jobs:
 
       - name: Generate SPDX SBOM
         run: >-
-          python scripts/generate_release_sbom.py
+          ${{ matrix.sbom_python }} scripts/generate_release_sbom.py
           --archive "${{ runner.temp }}/${{ matrix.syft_archive }}"
           --url "${{ env.SYFT_RELEASE_BASE_URL }}/${{ matrix.syft_archive }}"
           --sha256 "${{ matrix.syft_sha256 }}"

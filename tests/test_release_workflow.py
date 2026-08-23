@@ -127,6 +127,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("/opt/python/cp312-cp312/bin/python", self.workflow)
         self.assertIn("Build shared CPython for Linux packaging", self.workflow)
         self.assertIn("--target \"$TVIZ_PYTHON_PREFIX/lib/python3.12/site-packages\"", self.workflow)
+        self.assertIn("sbom_python: /opt/python/cp312-cp312/bin/python", self.workflow)
+        self.assertIn("${{ matrix.sbom_python }} scripts/generate_release_sbom.py", self.workflow)
         self.assertIn("--enable-shared", self.python_build_script)
         self.assertIn("--without-static-libpython", self.python_build_script)
         self.assertIn("--without-ensurepip", self.python_build_script)
