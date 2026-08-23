@@ -19,6 +19,7 @@ from scripts.build_release import (
     _pillow_notice_files,
     binary_architectures,
     create_tar_archive,
+    libffi_license_file,
     python_license_file,
     require_empty_release_directory,
     stage_package,
@@ -385,6 +386,21 @@ class ReleaseStagingTests(unittest.TestCase):
             (missing / "LICENSE.txt").write_text("not the PSF license\n", encoding="utf-8")
             with self.assertRaisesRegex(FileNotFoundError, "CPython 3.12 PSF license"):
                 python_license_file((missing,))
+
+    def test_libffi_license_is_hash_verified_from_linux_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            prefix = Path(temporary_dir)
+            license_path = prefix / "lib" / "python3.12" / "libffi-LICENSE.txt"
+            license_path.parent.mkdir(parents=True)
+            content = b"libffi license\n"
+            license_path.write_bytes(content)
+            with patch(
+                "scripts.build_release.LIBFFI_LICENSE_SHA256",
+                hashlib.sha256(content).hexdigest(),
+            ):
+                self.assertEqual(libffi_license_file(prefix), license_path)
+            with self.assertRaisesRegex(RuntimeError, "unrecognized license payload"):
+                libffi_license_file(prefix)
 
     def test_pillow_notice_collection_preserves_layout_and_fails_closed(self) -> None:
         class FakeDistribution:

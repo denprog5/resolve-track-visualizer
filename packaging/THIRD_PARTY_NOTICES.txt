@@ -30,6 +30,15 @@ installed PSF license is included verbatim as licenses/Python-LICENSE.txt; the
 release build fails if it cannot locate and validate that file. Source and
 license information are available from https://www.python.org/.
 
+libffi 3.4.8 (Linux)
+--------------------
+The Linux CPython _ctypes extension statically links the unmodified libffi
+3.4.8 release under its MIT license. The exact license is included as
+licenses/libffi-LICENSE.txt. The byte-identical source archive is published
+beside the release binaries:
+https://github.com/libffi/libffi/releases/download/v3.4.8/libffi-3.4.8.tar.gz
+SHA-256: bc9842a18898bfacb0ed1252c4febcc7e78fa139fd27fdc7a3e30d9d9356119b
+
 PyInstaller bootloader
 ----------------------
 PyInstaller is distributed under GPL-2.0-or-later with an exception that

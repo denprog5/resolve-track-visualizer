@@ -56,6 +56,8 @@ MUTAGEN_SOURCE_URL = (
     "mutagen-1.47.0.tar.gz"
 )
 MUTAGEN_SOURCE_SHA256 = "719fadef0a978c31b4cf3c956261b3c58b6948b32023078a2117b1de09f0fc99"
+LIBFFI_VERSION = "3.4.8"
+LIBFFI_LICENSE_SHA256 = "67894089811f93fca47a76f85e017da6f8582d4ba0905963c6e0f1ad6df7a195"
 
 
 @dataclass(frozen=True)
@@ -525,6 +527,17 @@ def python_license_file(prefixes: tuple[Path, ...] | None = None) -> Path:
     )
 
 
+def libffi_license_file(prefix: Path | None = None) -> Path:
+    runtime_prefix = prefix or Path(sys.base_prefix)
+    candidate = runtime_prefix / "lib" / f"python{RELEASE_PYTHON_SERIES}" / "libffi-LICENSE.txt"
+    if not candidate.is_file():
+        raise FileNotFoundError(f"Linux release Python is missing the libffi {LIBFFI_VERSION} license: {candidate}")
+    digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    if digest != LIBFFI_LICENSE_SHA256:
+        raise RuntimeError(f"libffi {LIBFFI_VERSION} has an unrecognized license payload: {digest}")
+    return candidate
+
+
 def distribution_license_files() -> dict[str, Path]:
     result: dict[str, Path] = {}
     for distribution_name in ("mutagen", "PyInstaller"):
@@ -533,6 +546,8 @@ def distribution_license_files() -> dict[str, Path]:
     for relative, source in _pillow_notice_files().items():
         result[f"Pillow/{relative}"] = source
     result["Python-LICENSE.txt"] = python_license_file()
+    if sys.platform.startswith("linux"):
+        result["libffi-LICENSE.txt"] = libffi_license_file()
     return result
 
 

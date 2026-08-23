@@ -71,6 +71,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "c08bc65a81971c1dd5783182826503369466c7e67374d1646519adf05207b684",
             self.workflow,
         )
+        self.assertIn("libffi-3.4.8.tar.gz", self.workflow)
+        self.assertIn(
+            "bc9842a18898bfacb0ed1252c4febcc7e78fa139fd27fdc7a3e30d9d9356119b",
+            self.workflow,
+        )
         self.assertNotIn("Verify external build tools", self.workflow)
 
     def test_ffmpeg_cache_has_explicit_per_target_toolchain_revisions(self) -> None:
@@ -125,6 +130,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--enable-shared", self.python_build_script)
         self.assertIn("--without-static-libpython", self.python_build_script)
         self.assertIn("--without-ensurepip", self.python_build_script)
+        self.assertIn("LIBFFI_CFLAGS", self.python_build_script)
+        self.assertIn("LIBFFI_LIBS", self.python_build_script)
+        self.assertIn("--disable-shared", self.python_build_script)
+        self.assertIn("--enable-static", self.python_build_script)
+        self.assertIn("import ctypes", self.python_build_script)
         self.assertIn("[[:space:]]+PY_VERSION[[:space:]]+", self.python_build_script)
         self.assertIn("Py_ENABLE_SHARED", self.python_build_script)
 
