@@ -16,18 +16,16 @@ verify_dependencies() {
                 echo "Could not read Windows runtime dependencies" >&2
                 exit 1
             fi
-            unexpected=$(
-                printf '%s\n' "$listed" |
-                    while IFS= read -r dependency; do
-                        case "$dependency" in
-                            api-ms-win-*.dll|ext-ms-win-*.dll|advapi32.dll|bcrypt.dll|cfgmgr32.dll|comctl32.dll|comdlg32.dll|crypt32.dll|dwmapi.dll|gdi32.dll|imm32.dll|iphlpapi.dll|kernel32.dll|msvcrt.dll|ntdll.dll|ole32.dll|oleaut32.dll|powrprof.dll|psapi.dll|rpcrt4.dll|secur32.dll|setupapi.dll|shell32.dll|shlwapi.dll|ucrtbase.dll|user32.dll|version.dll|winmm.dll|winspool.drv|ws2_32.dll|wtsapi32.dll)
-                                ;;
-                            *)
-                                printf '%s\n' "$dependency"
-                                ;;
-                        esac
-                    done
-            )
+            unexpected=
+            while IFS= read -r dependency; do
+                case "$dependency" in
+                    api-ms-win-*.dll|ext-ms-win-*.dll|advapi32.dll|bcrypt.dll|cfgmgr32.dll|comctl32.dll|comdlg32.dll|crypt32.dll|dwmapi.dll|gdi32.dll|imm32.dll|iphlpapi.dll|kernel32.dll|msvcrt.dll|ntdll.dll|ole32.dll|oleaut32.dll|powrprof.dll|psapi.dll|rpcrt4.dll|secur32.dll|setupapi.dll|shell32.dll|shlwapi.dll|ucrtbase.dll|user32.dll|version.dll|winmm.dll|winspool.drv|ws2_32.dll|wtsapi32.dll)
+                        ;;
+                    *)
+                        unexpected="${unexpected}${unexpected:+$'\n'}${dependency}"
+                        ;;
+                esac
+            done <<< "$listed"
             ;;
         macos)
             listed=$(printf '%s\n' "$dependencies" | sed -n '2,$s/^[[:space:]]*\([^[:space:]]*\).*/\1/p')
@@ -35,18 +33,16 @@ verify_dependencies() {
                 echo "Could not read macOS runtime dependencies" >&2
                 exit 1
             fi
-            unexpected=$(
-                printf '%s\n' "$listed" |
-                    while IFS= read -r dependency; do
-                        case "$dependency" in
-                            /usr/lib/*|/System/Library/*|/Library/Apple/System/Library/*)
-                                ;;
-                            *)
-                                printf '%s\n' "$dependency"
-                                ;;
-                        esac
-                    done
-            )
+            unexpected=
+            while IFS= read -r dependency; do
+                case "$dependency" in
+                    /usr/lib/*|/System/Library/*|/Library/Apple/System/Library/*)
+                        ;;
+                    *)
+                        unexpected="${unexpected}${unexpected:+$'\n'}${dependency}"
+                        ;;
+                esac
+            done <<< "$listed"
             ;;
         linux)
             if printf '%s\n' "$dependencies" | grep -q 'not found'; then
@@ -66,18 +62,16 @@ verify_dependencies() {
                 echo "Could not read Linux runtime dependencies" >&2
                 exit 1
             fi
-            unexpected=$(
-                printf '%s\n' "$listed" |
-                    while IFS= read -r dependency; do
-                        case "$dependency" in
-                            ""|linux-vdso.so.1|ld-linux-x86-64.so.2|libanl.so.1|libatomic.so.1|libc.so.6|libcrypt.so.1|libdl.so.2|libgcc_s.so.1|libm.so.6|libnsl.so.1|libpthread.so.0|libresolv.so.2|librt.so.1|libutil.so.1)
-                                ;;
-                            *)
-                                printf '%s\n' "$dependency"
-                                ;;
-                        esac
-                    done
-            )
+            unexpected=
+            while IFS= read -r dependency; do
+                case "$dependency" in
+                    ""|linux-vdso.so.1|ld-linux-x86-64.so.2|libanl.so.1|libatomic.so.1|libc.so.6|libcrypt.so.1|libdl.so.2|libgcc_s.so.1|libm.so.6|libnsl.so.1|libpthread.so.0|libresolv.so.2|librt.so.1|libutil.so.1)
+                        ;;
+                    *)
+                        unexpected="${unexpected}${unexpected:+$'\n'}${dependency}"
+                        ;;
+                esac
+            done <<< "$listed"
             ;;
         *)
             echo "Unsupported dependency platform: $platform" >&2
@@ -170,6 +164,10 @@ export TZ=UTC
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1704067200}
 
 cd "$ffmpeg_build_dir"
+extra_configure_flags=()
+if [[ ${MSYSTEM:-} == UCRT64 ]]; then
+    extra_configure_flags+=(--extra-ldflags=-static)
+fi
 "$ffmpeg_source_dir/configure" \
     --prefix="$prefix_dir" \
     --enable-gpl \
@@ -192,7 +190,8 @@ cd "$ffmpeg_build_dir"
     --enable-muxer=mov,s16le \
     --enable-parser=aac,flac,mpegaudio,opus,vorbis \
     --enable-protocol=file,pipe \
-    --enable-filter=abuffer,abuffersink,aformat,aresample,buffer,buffersink,format,scale
+    --enable-filter=abuffer,abuffersink,aformat,aresample,buffer,buffersink,format,scale \
+    "${extra_configure_flags[@]}"
 
 make -j"$jobs"
 make install

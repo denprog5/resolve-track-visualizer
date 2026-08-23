@@ -212,18 +212,32 @@ class ReleaseStagingTests(unittest.TestCase):
             "GNU General Public License; either version 3 of the License, "
             "or (at your option) any later version"
         )
-        validate_ffmpeg_configuration(configuration, license_text)
+        linux_target = BuildTarget("linux", "x86_64")
+        validate_ffmpeg_configuration(configuration, license_text, linux_target)
         quoted_configuration = re.sub(
             r"(--enable-(?:decoder|encoder|demuxer|muxer|parser|protocol|filter)=)(\S+)",
             r"\1'\2'",
             configuration,
         ).replace(" --", "\n  --")
-        validate_ffmpeg_configuration(f"configuration:\n  {quoted_configuration}", license_text)
+        validate_ffmpeg_configuration(
+            f"configuration:\n  {quoted_configuration}", license_text, linux_target
+        )
+
+        windows_target = BuildTarget("windows", "x86_64")
+        with self.assertRaisesRegex(RuntimeError, "extra-ldflags"):
+            validate_ffmpeg_configuration(configuration, license_text, windows_target)
+        validate_ffmpeg_configuration(
+            configuration + " --extra-ldflags=-static", license_text, windows_target
+        )
 
         with self.assertRaisesRegex(RuntimeError, "exact release recipe"):
-            validate_ffmpeg_configuration(configuration + " --enable-libx264", license_text)
+            validate_ffmpeg_configuration(
+                configuration + " --enable-libx264", license_text, linux_target
+            )
         with self.assertRaisesRegex(RuntimeError, "required release configuration"):
-            validate_ffmpeg_configuration(configuration.replace("--disable-everything", ""), license_text)
+            validate_ffmpeg_configuration(
+                configuration.replace("--disable-everything", ""), license_text, linux_target
+            )
         with self.assertRaisesRegex(RuntimeError, "required release configuration"):
             validate_ffmpeg_configuration(
                 configuration.replace(
@@ -231,6 +245,7 @@ class ReleaseStagingTests(unittest.TestCase):
                     "--enable-encoder=png,pcm_s16le,prores_ks,qtrle",
                 ),
                 license_text,
+                linux_target,
             )
 
     def test_ffmpeg_capability_listing_requires_media_features_and_no_network(self) -> None:
@@ -304,12 +319,19 @@ class ReleaseStagingTests(unittest.TestCase):
             raise AssertionError(flag)
 
         with patch("scripts.build_release.tool_information", side_effect=information):
-            validate_ffmpeg_pair(Path("ffmpeg"), Path("ffprobe"), "9.0.1")
+            validate_ffmpeg_pair(
+                Path("ffmpeg"), Path("ffprobe"), "9.0.1", BuildTarget("linux", "x86_64")
+            )
 
         versions["ffprobe"] += " --enable-small"
         with patch("scripts.build_release.tool_information", side_effect=information):
             with self.assertRaisesRegex(RuntimeError, "same recorded build configuration"):
-                validate_ffmpeg_pair(Path("ffmpeg"), Path("ffprobe"), "9.0.1")
+                validate_ffmpeg_pair(
+                    Path("ffmpeg"),
+                    Path("ffprobe"),
+                    "9.0.1",
+                    BuildTarget("linux", "x86_64"),
+                )
 
     def test_release_output_fails_closed_without_deleting_stale_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:

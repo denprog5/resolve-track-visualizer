@@ -181,6 +181,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "--enable-parser=aac,flac,mpegaudio,opus,vorbis",
             "--enable-protocol=file,pipe",
             "--enable-filter=abuffer,abuffersink,aformat,aresample,buffer,buffersink,format,scale",
+            "--extra-ldflags=-static",
         ):
             self.assertIn(option, self.build_script)
         self.assertNotIn("--enable-nonfree", self.build_script)

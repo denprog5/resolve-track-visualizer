@@ -193,7 +193,11 @@ def tool_information(path: Path, *arguments: str) -> str:
     return (result.stdout or result.stderr).strip()
 
 
-def validate_ffmpeg_configuration(build_configuration: str, license_text: str) -> None:
+def validate_ffmpeg_configuration(
+    build_configuration: str,
+    license_text: str,
+    target: BuildTarget,
+) -> None:
     required = {
         "--enable-gpl",
         "--enable-version3",
@@ -217,6 +221,8 @@ def validate_ffmpeg_configuration(build_configuration: str, license_text: str) -
         "--enable-protocol=file,pipe",
         "--enable-filter=abuffer,abuffersink,aformat,aresample,buffer,buffersink,format,scale",
     }
+    if target.system == "windows":
+        required.add("--extra-ldflags=-static")
     configured = {token for token in shlex.split(build_configuration) if token.startswith("--")}
     missing = sorted(required - configured)
     if missing:
@@ -256,10 +262,13 @@ def validate_ffmpeg_capabilities(ffmpeg: Path) -> None:
         "filters": {"abuffer", "abuffersink", "aformat", "aresample", "buffer", "buffersink", "format", "scale"},
     }
     for category, expected in requirements.items():
-        available = _listed_components(tool_information(ffmpeg, f"-{category}"))
+        listing = tool_information(ffmpeg, f"-{category}")
+        available = _listed_components(listing)
         missing = sorted(expected - available)
         if missing:
-            raise RuntimeError(f"FFmpeg is missing required {category}: {missing}")
+            raise RuntimeError(
+                f"FFmpeg is missing required {category}: {missing}; parsed={sorted(available)}\n{listing}"
+            )
 
     protocols = {
         line.strip()
@@ -343,7 +352,12 @@ def smoke_test_ffmpeg(ffmpeg: Path, ffprobe: Path) -> None:
             raise RuntimeError(f"ffprobe tag capability test failed: {tags_probe}")
 
 
-def validate_ffmpeg_pair(ffmpeg: Path, ffprobe: Path, expected_release: str) -> str:
+def validate_ffmpeg_pair(
+    ffmpeg: Path,
+    ffprobe: Path,
+    expected_release: str,
+    target: BuildTarget,
+) -> str:
     ffmpeg_version = tool_information(ffmpeg, "-version")
     ffprobe_version = tool_information(ffprobe, "-version")
     first_ffmpeg_line = ffmpeg_version.splitlines()[0] if ffmpeg_version else ""
@@ -367,7 +381,7 @@ def validate_ffmpeg_pair(ffmpeg: Path, ffprobe: Path, expected_release: str) -> 
         raise RuntimeError("ffmpeg and ffprobe must have the same recorded build configuration")
     build_configuration = tool_information(ffmpeg, "-buildconf")
     license_text = tool_information(ffmpeg, "-L")
-    validate_ffmpeg_configuration(build_configuration, license_text)
+    validate_ffmpeg_configuration(build_configuration, license_text, target)
     return f"{ffmpeg_version}\n\n{build_configuration}\n\n{license_text}\n"
 
 
@@ -908,7 +922,7 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError("--ffmpeg-source-sha256 must be a lowercase SHA-256 digest")
     validate_native_binary(ffmpeg, target, "ffmpeg")
     validate_native_binary(ffprobe, target, "ffprobe")
-    ffmpeg_build_info = validate_ffmpeg_pair(ffmpeg, ffprobe, args.ffmpeg_version)
+    ffmpeg_build_info = validate_ffmpeg_pair(ffmpeg, ffprobe, args.ffmpeg_version, target)
     validate_ffmpeg_capabilities(ffmpeg)
     smoke_test_ffmpeg(ffmpeg, ffprobe)
     if not (ROOT / "LICENSE").is_file():
