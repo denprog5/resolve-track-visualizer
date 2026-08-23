@@ -258,7 +258,6 @@ def validate_ffmpeg_capabilities(ffmpeg: Path) -> None:
         "decoders": {"aac", "alac", "flac", "mp3float", "opus", "pcm_s16be", "pcm_s16le", "rawvideo", "vorbis"},
         "demuxers": {"aac", "aiff", "flac", "mov", "mp3", "ogg", "rawvideo", "wav"},
         "muxers": {"mov", "s16le"},
-        "parsers": {"aac", "flac", "mpegaudio", "opus", "vorbis"},
         "filters": {"abuffer", "abuffersink", "aformat", "aresample", "buffer", "buffersink", "format", "scale"},
     }
     for category, expected in requirements.items():

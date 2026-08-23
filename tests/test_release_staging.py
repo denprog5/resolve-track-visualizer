@@ -257,7 +257,6 @@ class ReleaseStagingTests(unittest.TestCase):
             ),
             "-demuxers": " D aac\n D aiff\n D flac\n D mov,mp4,m4a\n D mp3\n D ogg\n D rawvideo\n D wav\n",
             "-muxers": " E mov\n E s16le\n",
-            "-parsers": "aac\nflac\nmpegaudio\nopus\nvorbis\n",
             "-filters": (
                 " ... abuffer A->A\n ... abuffersink A->A\n ... aformat A->A\n ... aresample A->A\n"
                 " ... buffer V->V\n ... buffersink V->V\n ... format V->V\n ... scale V->V\n"
