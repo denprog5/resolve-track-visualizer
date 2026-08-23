@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 BUILD_SCRIPT = ROOT / "packaging" / "scripts" / "build_ffmpeg.sh"
+PYTHON_BUILD_SCRIPT = ROOT / "packaging" / "scripts" / "build_python.sh"
 RELEASE_LOCK = ROOT / "requirements-release.txt"
 BASH = shutil.which("bash")
 if BASH is None:
@@ -24,6 +25,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
         cls.ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
         cls.build_script = BUILD_SCRIPT.read_text(encoding="utf-8")
+        cls.python_build_script = PYTHON_BUILD_SCRIPT.read_text(encoding="utf-8")
         cls.release_lock = RELEASE_LOCK.read_text(encoding="utf-8")
 
     def test_all_actions_are_pinned_to_full_commit_shas(self) -> None:
@@ -48,9 +50,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("7.1.1", self.workflow)
         self.assertNotIn("zlib", self.workflow.lower())
         self.assertIn("Restore unsigned FFmpeg build", self.workflow)
-        self.assertEqual(self.workflow.count("uses: actions/cache@"), 1)
+        self.assertIn("Restore shared CPython build", self.workflow)
+        self.assertEqual(self.workflow.count("uses: actions/cache@"), 2)
         self.assertNotIn("cache: pip", self.workflow)
         self.assertIn("hashFiles('packaging/scripts/build_ffmpeg.sh')", self.workflow)
+        self.assertIn("hashFiles('packaging/scripts/build_python.sh')", self.workflow)
         self.assertNotIn("restore-keys:", self.workflow)
         self.assertEqual(self.workflow.count("--verify-prefix"), 2)
         self.assertIn("Verify cached or freshly built FFmpeg", self.workflow)
@@ -60,6 +64,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("mutagen-1.47.0.tar.gz", self.workflow)
         self.assertIn(
             "719fadef0a978c31b4cf3c956261b3c58b6948b32023078a2117b1de09f0fc99",
+            self.workflow,
+        )
+        self.assertIn("Python-3.12.13.tar.xz", self.workflow)
+        self.assertIn(
+            "c08bc65a81971c1dd5783182826503369466c7e67374d1646519adf05207b684",
             self.workflow,
         )
         self.assertNotIn("Verify external build tools", self.workflow)
@@ -104,13 +113,29 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('python-version: "3.12.13"', self.ci_workflow)
         self.assertNotIn('python-version: "3.12"', self.ci_workflow)
         self.assertEqual(self.workflow.count('python-version: "3.12.13"'), 3)
-        self.assertEqual(self.workflow.count("expected='3.12.13'"), 3)
+        self.assertEqual(self.workflow.count("expected='3.12.13'"), 4)
         self.assertEqual(self.workflow.count('python_version: "3.12.10"'), 3)
         self.assertEqual(self.workflow.count('python_version: "3.12.13"'), 1)
         self.assertIn("python-version: ${{ matrix.python_version }}", self.workflow)
         self.assertIn("TVIZ_PYTHON_VERSION: ${{ matrix.python_version }}", self.workflow)
         self.assertIn("expected=os.environ['TVIZ_PYTHON_VERSION']", self.workflow)
         self.assertIn("/opt/python/cp312-cp312/bin/python", self.workflow)
+        self.assertIn("Build shared CPython for Linux packaging", self.workflow)
+        self.assertIn("--target \"$TVIZ_PYTHON_PREFIX/lib/python3.12/site-packages\"", self.workflow)
+        self.assertIn("--enable-shared", self.python_build_script)
+        self.assertIn("--without-static-libpython", self.python_build_script)
+        self.assertIn("--without-ensurepip", self.python_build_script)
+        self.assertIn("Py_ENABLE_SHARED", self.python_build_script)
+
+    @unittest.skipUnless(BASH, "bash is required for build script syntax tests")
+    def test_dependency_build_scripts_parse_as_bash(self) -> None:
+        result = subprocess.run(
+            [str(BASH), "-n", str(BUILD_SCRIPT), str(PYTHON_BUILD_SCRIPT)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_release_version_pattern_accepts_zero_major_semver(self) -> None:
         match = re.search(r'version_pattern = r"([^"]+)"', self.workflow)
