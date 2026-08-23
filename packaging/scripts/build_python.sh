@@ -15,8 +15,9 @@ prefix_parent=$(cd "$prefix_parent" && pwd)
 prefix_dir="$prefix_parent/$(basename "$2")"
 python_build_dir="$prefix_parent/python-build"
 
-if ! grep -Fq "#define PY_VERSION \"$PYTHON_VERSION\"" "$python_source_dir/Include/patchlevel.h"; then
-    echo "Expected the unmodified CPython $PYTHON_VERSION source tree at $python_source_dir" >&2
+if ! grep -Eq "^#define[[:space:]]+PY_VERSION[[:space:]]+\"$PYTHON_VERSION\"$" \
+    "$python_source_dir/Include/patchlevel.h"; then
+    echo "Expected CPython $PYTHON_VERSION source at $python_source_dir" >&2
     exit 1
 fi
 

@@ -125,6 +125,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--enable-shared", self.python_build_script)
         self.assertIn("--without-static-libpython", self.python_build_script)
         self.assertIn("--without-ensurepip", self.python_build_script)
+        self.assertIn("[[:space:]]+PY_VERSION[[:space:]]+", self.python_build_script)
         self.assertIn("Py_ENABLE_SHARED", self.python_build_script)
 
     @unittest.skipUnless(BASH, "bash is required for build script syntax tests")
