@@ -78,7 +78,8 @@ jobs:
               requested = ref[1:]
           else:
               requested = os.environ["INPUT_VERSION"].strip()
-          if not re.fullmatch(r"0|[1-9]\d*(?:\.(?:0|[1-9]\d*)){2}(?:-[0-9A-Za-z.-]+)?", requested):
+          version_pattern = r"(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){2}(?:-[0-9A-Za-z.-]+)?"
+          if not re.fullmatch(version_pattern, requested):
               raise SystemExit(f"Version is not supported semantic version syntax: {requested}")
           if requested != source_version:
               raise SystemExit(

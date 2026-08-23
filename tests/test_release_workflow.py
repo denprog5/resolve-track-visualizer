@@ -107,6 +107,15 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(self.workflow.count("expected='3.12.13'"), 4)
         self.assertIn("/opt/python/cp312-cp312/bin/python", self.workflow)
 
+    def test_release_version_pattern_accepts_zero_major_semver(self) -> None:
+        match = re.search(r'version_pattern = r"([^"]+)"', self.workflow)
+        self.assertIsNotNone(match)
+        pattern = re.compile(match.group(1))
+        for version in ("0.1.0", "1.0.0", "12.34.56-preview.1"):
+            self.assertIsNotNone(pattern.fullmatch(version), version)
+        for version in ("0", "0.1", "01.2.3", "1.02.3", "v1.2.3"):
+            self.assertIsNone(pattern.fullmatch(version), version)
+
     def test_syft_is_downloaded_from_checksum_pinned_official_archives(self) -> None:
         self.assertNotIn("anchore/sbom-action@", self.workflow)
         self.assertNotIn("raw.githubusercontent.com/anchore/syft", self.workflow)
