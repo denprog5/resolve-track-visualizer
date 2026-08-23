@@ -78,7 +78,7 @@ python scripts/build_release.py \
   --release-dir release
 ```
 
-The builder derives the product version from `davinci_track_visualizer.__version__`, detects the native host/architecture, and rejects unsupported or non-64-bit hosts. The license, exact FFmpeg version, source URL, and source digest are mandatory. It also refuses to build into a nonempty output directory and never deletes stale user artifacts. The workflow uses a run-specific directory under `runner.temp` and, after generating the SBOM, requires the exact target-specific artifact set before upload.
+The builder derives the product version from `davinci_track_visualizer.__version__`, detects the native host/architecture, and rejects unsupported or non-64-bit hosts. The license, exact FFmpeg version, source URL, and source digest are mandatory. It also refuses to build into a nonempty output directory and never deletes stale user artifacts. The workflow uses a run-specific directory under the ignored workspace `build/` tree and, after generating the SBOM, requires the exact target-specific artifact set before upload.
 
 The builder produces:
 

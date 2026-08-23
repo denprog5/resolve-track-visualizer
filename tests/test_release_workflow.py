@@ -211,7 +211,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 self.assertEqual(result.returncode == 0, accepted, result.stderr)
 
     def test_release_output_is_isolated_and_exactly_validated_after_sbom(self) -> None:
-        self.assertIn("TVIZ_RELEASE_DIR: ${{ runner.temp }}/tviz-release-", self.workflow)
+        self.assertIn(
+            "TVIZ_RELEASE_DIR: ${{ github.workspace }}/build/release-output-",
+            self.workflow,
+        )
         self.assertNotIn("Clean release output", self.workflow)
         self.assertNotIn("shutil.rmtree('release'", self.workflow)
         self.assertNotIn("path: release/*", self.workflow)

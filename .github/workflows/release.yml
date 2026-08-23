@@ -173,7 +173,7 @@ jobs:
     env:
       TVIZ_VERSION: ${{ needs.prepare.outputs.version }}
       TVIZ_TARGET: ${{ matrix.target }}
-      TVIZ_RELEASE_DIR: ${{ runner.temp }}/tviz-release-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.target }}
+      TVIZ_RELEASE_DIR: ${{ github.workspace }}/build/release-output-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.target }}
       TVIZ_FFMPEG: ${{ github.workspace }}/build/ffmpeg/${{ matrix.target }}/prefix/bin/ffmpeg${{ matrix.executable_suffix }}
       TVIZ_FFPROBE: ${{ github.workspace }}/build/ffmpeg/${{ matrix.target }}/prefix/bin/ffprobe${{ matrix.executable_suffix }}
       TVIZ_FFMPEG_LICENSE: ${{ github.workspace }}/build/ffmpeg/source/ffmpeg-9.0.1/COPYING.GPLv3
