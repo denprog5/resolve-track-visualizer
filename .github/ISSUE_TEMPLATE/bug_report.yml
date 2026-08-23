@@ -1,0 +1,82 @@
+name: Bug report
+description: Report a reproducible problem in Resolve Track Visualizer
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report vulnerabilities here; use SECURITY.md. Remove private media, personal paths, credentials, and tokens from logs.
+
+  - type: input
+    id: version
+    attributes:
+      label: Track Visualizer version
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: resolve
+    attributes:
+      label: DaVinci Resolve edition and version
+      placeholder: DaVinci Resolve Studio 20.2.1
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and architecture
+      placeholder: Windows 11 24H2 x64
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation type
+      options:
+        - Release artifact
+        - Development checkout
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include a minimal timeline layout and the exact action that fails.
+      placeholder: |
+        1. Create a timeline...
+        2. Open Track Visualizer...
+        3. Select...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized diagnostics
+      description: Paste relevant diagnostics after removing sensitive values.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Checks
+      options:
+        - label: I reproduced this with the version and environment listed above.
+          required: true
+        - label: I removed private media, personal paths, credentials, and tokens.
+          required: true

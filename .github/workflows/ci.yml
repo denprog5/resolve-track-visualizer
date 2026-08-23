@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python tests and Lua parse
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt "luaparser==4.0.1"
+
+      - name: Run Python tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Parse Resolve Lua script
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from luaparser import ast
+
+          source = Path("resolve_scripts/Track Visualizer.lua")
+          ast.parse(source.read_text(encoding="utf-8"))
+          print(f"Parsed {source}")
+          PY

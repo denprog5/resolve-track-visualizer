@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Build and generated output
+build/
+dist/
+release/
+outputs/
+*.spec
+*.log
+
+# Native release packages
+*.exe
+*.msi
+*.dmg
+*.pkg
+*.app
+*.AppImage
+*.deb
+*.rpm
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.sha256
+*.spdx.json
+
+# Local media and diagnostics
+*.mov
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.aac
+*.ogg
+clip_property_dump.txt
+/s1.png
+/s2.png
+/s3.png
+/PLAN.md
+
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+credentials/
+secrets/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local agent tooling
+.agents/
+.opencode/
+skills-lock.json

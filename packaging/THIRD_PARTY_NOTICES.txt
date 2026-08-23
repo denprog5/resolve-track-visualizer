@@ -1,0 +1,59 @@
+DaVinci Track Visualizer third-party notices
+============================================
+
+The project and packaged application are distributed under GPL-3.0-or-later.
+
+Mutagen
+-------
+Mutagen is distributed under GPL-2.0-or-later. Its source and license are
+available from the exact Mutagen 1.47.0 source archive used for this release:
+https://files.pythonhosted.org/packages/81/e6/64bc71b74eef4b68e61eb921dcf72dabd9e4ec4af1e11891bbd312ccbb77/mutagen-1.47.0.tar.gz
+SHA-256: 719fadef0a978c31b4cf3c956261b3c58b6948b32023078a2117b1de09f0fc99
+The archive is published beside the release binaries and recorded inside each
+package under licenses/MUTAGEN_SOURCE_OFFER.txt.
+
+Pillow 12.2.0 and bundled native libraries
+-------------------------------------------
+The authoritative license and copyright notices shipped in the exact,
+hash-locked Pillow wheel are included under
+licenses/Pillow/pillow-12.2.0.dist-info/licenses/LICENSE. Pillow combines its
+MIT-CMU notice and the notices for the native libraries bundled in that wheel
+in this file. The release build copies the installed distribution's file
+verbatim and fails if the expected Pillow version or notice payload is absent.
+Source information is available from https://github.com/python-pillow/Pillow.
+
+Python
+------
+The packaged CPython 3.12.13 runtime is distributed under the Python Software
+Foundation License. Its installed PSF license is included verbatim as
+licenses/Python-LICENSE.txt; the release build fails if it cannot locate and
+validate that file. Source and license information are available from
+https://www.python.org/.
+
+PyInstaller bootloader
+----------------------
+PyInstaller is distributed under GPL-2.0-or-later with an exception that
+permits distribution of programs containing its bootloader. Source and
+license information are available from https://pyinstaller.org/.
+
+FFmpeg 9.0.1 and FFprobe
+------------------------
+The bundled programs are built from the unmodified official FFmpeg 9.0.1
+source with GPL and version-3 terms enabled. This configured build is
+GPL-3.0-or-later, compatible with the project's chosen license. Nonfree
+components and external libraries are not enabled. The build starts from
+--disable-everything and enables only the codecs, formats, filters, parsers,
+and local protocols used for supported audio analysis, overlay rendering,
+and probing. Network support, shared FFmpeg libraries, and autodetected
+optional libraries are disabled. FFmpeg libraries are linked statically into
+the programs; operating-system runtime libraries remain platform dependencies.
+
+Official source URL:
+https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz
+
+SHA-256:
+cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635
+
+The exact official archive is published beside the release binaries. The
+package includes the applicable license, complete build/license output, source
+record, and exact build recipe under licenses/.
