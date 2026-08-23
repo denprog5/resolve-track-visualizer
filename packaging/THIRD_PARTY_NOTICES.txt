@@ -24,11 +24,11 @@ Source information is available from https://github.com/python-pillow/Pillow.
 
 Python
 ------
-The packaged CPython 3.12.13 runtime is distributed under the Python Software
-Foundation License. Its installed PSF license is included verbatim as
-licenses/Python-LICENSE.txt; the release build fails if it cannot locate and
-validate that file. Source and license information are available from
-https://www.python.org/.
+The packaged CPython 3.12 runtime (3.12.10 on Windows/macOS and 3.12.13 on
+Linux) is distributed under the Python Software Foundation License. Its
+installed PSF license is included verbatim as licenses/Python-LICENSE.txt; the
+release build fails if it cannot locate and validate that file. Source and
+license information are available from https://www.python.org/.
 
 PyInstaller bootloader
 ----------------------

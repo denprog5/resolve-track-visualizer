@@ -129,6 +129,7 @@ jobs:
           - target: windows-x64
             display_name: Windows x64
             runner: windows-2025
+            python_version: "3.12.10"
             container_image: ""
             executable_suffix: .exe
             runtime_baseline: Windows x64 with Universal CRT
@@ -139,6 +140,7 @@ jobs:
           - target: linux-x64
             display_name: Linux x64
             runner: ubuntu-24.04
+            python_version: "3.12.13"
             container_image: quay.io/pypa/manylinux_2_28_x86_64:2026.05.01-1@sha256:1d3ecb1a3e411f58bc3fd36668d2976db869d64bceaf3486ef2541b0105d2d31
             executable_suffix: ""
             runtime_baseline: glibc 2.28 or later
@@ -149,6 +151,7 @@ jobs:
           - target: macos-arm64
             display_name: macOS arm64
             runner: macos-15
+            python_version: "3.12.10"
             container_image: ""
             executable_suffix: ""
             runtime_baseline: macOS 15 arm64
@@ -159,6 +162,7 @@ jobs:
           - target: macos-x64
             display_name: macOS Intel
             runner: macos-15-intel
+            python_version: "3.12.10"
             container_image: ""
             executable_suffix: ""
             runtime_baseline: macOS 15 x86_64
@@ -174,6 +178,7 @@ jobs:
     env:
       TVIZ_VERSION: ${{ needs.prepare.outputs.version }}
       TVIZ_TARGET: ${{ matrix.target }}
+      TVIZ_PYTHON_VERSION: ${{ matrix.python_version }}
       TVIZ_RELEASE_DIR: ${{ github.workspace }}/build/release-output-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.target }}
       TVIZ_FFMPEG: ${{ github.workspace }}/build/ffmpeg/${{ matrix.target }}/prefix/bin/ffmpeg${{ matrix.executable_suffix }}
       TVIZ_FFPROBE: ${{ github.workspace }}/build/ffmpeg/${{ matrix.target }}/prefix/bin/ffprobe${{ matrix.executable_suffix }}
@@ -192,7 +197,7 @@ jobs:
         if: matrix.target != 'linux-x64'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12.13"
+          python-version: ${{ matrix.python_version }}
 
       - name: Select manylinux Python and verify glibc baseline
         if: matrix.target == 'linux-x64'
@@ -211,7 +216,7 @@ jobs:
           PY
 
       - name: Verify exact Python runtime
-        run: python -c "import platform; expected='3.12.13'; actual=platform.python_version(); assert actual == expected, f'Expected Python {expected}, found {actual}'"
+        run: python -c "import os, platform; expected=os.environ['TVIZ_PYTHON_VERSION']; actual=platform.python_version(); assert actual == expected, f'Expected Python {expected}, found {actual}'"
 
       - name: Select and verify pinned macOS toolchain
         if: startsWith(matrix.target, 'macos-')

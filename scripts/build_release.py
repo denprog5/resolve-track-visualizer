@@ -33,7 +33,13 @@ from davinci_track_visualizer import __version__
 PRODUCT_NAME = "DavinciTrackVisualizer"
 DEFAULT_SOURCE_DATE_EPOCH = 1_704_067_200
 EXECUTABLE_ROLES = ("engine", "runner", "ffmpeg", "ffprobe")
-RELEASE_PYTHON_VERSION = "3.12.13"
+RELEASE_PYTHON_VERSIONS = {
+    "windows-x64": "3.12.10",
+    "linux-x64": "3.12.13",
+    "macos-arm64": "3.12.10",
+    "macos-x64": "3.12.10",
+}
+RELEASE_PYTHON_SERIES = "3.12"
 MUTAGEN_VERSION = "1.47.0"
 PILLOW_VERSION = "12.2.0"
 PILLOW_LICENSE_PATH = f"pillow-{PILLOW_VERSION}.dist-info/licenses/LICENSE"
@@ -110,7 +116,8 @@ def host_target() -> BuildTarget:
     return target
 
 
-def validate_python_runtime(version: str = RELEASE_PYTHON_VERSION) -> None:
+def validate_python_runtime(target: BuildTarget) -> None:
+    version = RELEASE_PYTHON_VERSIONS[target.tag]
     actual = platform.python_version()
     if actual != version:
         raise RuntimeError(f"Release builds require Python {version}, found {actual}")
@@ -210,7 +217,7 @@ def validate_ffmpeg_configuration(build_configuration: str, license_text: str) -
         "--enable-protocol=file,pipe",
         "--enable-filter=abuffer,abuffersink,aformat,aresample,buffer,buffersink,format,scale",
     }
-    configured = set(re.findall(r"--[\w-]+(?:=[^\s'\"]+)?", build_configuration))
+    configured = {token for token in shlex.split(build_configuration) if token.startswith("--")}
     missing = sorted(required - configured)
     if missing:
         raise RuntimeError(f"FFmpeg is missing required release configuration: {missing}")
@@ -477,7 +484,7 @@ def python_license_file(prefixes: tuple[Path, ...] | None = None) -> Path:
             Path(value)
             for value in (sys.base_prefix, sys.prefix, sys.base_exec_prefix, sys.exec_prefix)
         )
-    python_minor = ".".join(RELEASE_PYTHON_VERSION.split(".")[:2])
+    python_minor = RELEASE_PYTHON_SERIES
     relative_candidates = (
         Path("LICENSE.txt"),
         Path("LICENSE"),
@@ -501,7 +508,7 @@ def python_license_file(prefixes: tuple[Path, ...] | None = None) -> Path:
                 return candidate
     locations = ", ".join(str(path) for path in searched)
     raise FileNotFoundError(
-        f"CPython {RELEASE_PYTHON_VERSION} PSF license was not found in: {locations}"
+        f"CPython {RELEASE_PYTHON_SERIES} PSF license was not found in: {locations}"
     )
 
 
@@ -881,8 +888,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    validate_python_runtime()
     target = host_target()
+    validate_python_runtime(target)
     validate_release_environment(target, __version__)
     release_dir = args.release_dir.resolve()
     require_empty_release_directory(release_dir)

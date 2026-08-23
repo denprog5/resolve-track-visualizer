@@ -103,8 +103,13 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_python_runtime_is_exactly_pinned_and_verified(self) -> None:
         self.assertIn('python-version: "3.12.13"', self.ci_workflow)
         self.assertNotIn('python-version: "3.12"', self.ci_workflow)
-        self.assertEqual(self.workflow.count('python-version: "3.12.13"'), 4)
-        self.assertEqual(self.workflow.count("expected='3.12.13'"), 4)
+        self.assertEqual(self.workflow.count('python-version: "3.12.13"'), 3)
+        self.assertEqual(self.workflow.count("expected='3.12.13'"), 3)
+        self.assertEqual(self.workflow.count('python_version: "3.12.10"'), 3)
+        self.assertEqual(self.workflow.count('python_version: "3.12.13"'), 1)
+        self.assertIn("python-version: ${{ matrix.python_version }}", self.workflow)
+        self.assertIn("TVIZ_PYTHON_VERSION: ${{ matrix.python_version }}", self.workflow)
+        self.assertIn("expected=os.environ['TVIZ_PYTHON_VERSION']", self.workflow)
         self.assertIn("/opt/python/cp312-cp312/bin/python", self.workflow)
 
     def test_release_version_pattern_accepts_zero_major_semver(self) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import stat
 import tarfile
 import tempfile
@@ -212,6 +213,12 @@ class ReleaseStagingTests(unittest.TestCase):
             "or (at your option) any later version"
         )
         validate_ffmpeg_configuration(configuration, license_text)
+        quoted_configuration = re.sub(
+            r"(--enable-(?:decoder|encoder|demuxer|muxer|parser|protocol|filter)=)(\S+)",
+            r"\1'\2'",
+            configuration,
+        ).replace(" --", "\n  --")
+        validate_ffmpeg_configuration(f"configuration:\n  {quoted_configuration}", license_text)
 
         with self.assertRaisesRegex(RuntimeError, "exact release recipe"):
             validate_ffmpeg_configuration(configuration + " --enable-libx264", license_text)
@@ -317,11 +324,19 @@ class ReleaseStagingTests(unittest.TestCase):
             self.assertEqual(stale.read_bytes(), b"user data")
 
     def test_release_python_runtime_must_match_exact_patch(self) -> None:
-        with patch("scripts.build_release.platform.python_version", return_value="3.12.13"):
-            validate_python_runtime()
+        expected_versions = {
+            BuildTarget("windows", "x86_64"): "3.12.10",
+            BuildTarget("linux", "x86_64"): "3.12.13",
+            BuildTarget("macos", "arm64"): "3.12.10",
+            BuildTarget("macos", "x86_64"): "3.12.10",
+        }
+        for target, expected in expected_versions.items():
+            with self.subTest(target=target.tag):
+                with patch("scripts.build_release.platform.python_version", return_value=expected):
+                    validate_python_runtime(target)
         with patch("scripts.build_release.platform.python_version", return_value="3.12.12"):
-            with self.assertRaisesRegex(RuntimeError, "require Python 3.12.13"):
-                validate_python_runtime()
+            with self.assertRaisesRegex(RuntimeError, "require Python 3.12.10"):
+                validate_python_runtime(BuildTarget("windows", "x86_64"))
 
     def test_python_license_is_found_in_all_release_runtime_layouts(self) -> None:
         layouts = {
@@ -347,7 +362,7 @@ class ReleaseStagingTests(unittest.TestCase):
             missing = root / "missing"
             missing.mkdir()
             (missing / "LICENSE.txt").write_text("not the PSF license\n", encoding="utf-8")
-            with self.assertRaisesRegex(FileNotFoundError, "CPython 3.12.13 PSF license"):
+            with self.assertRaisesRegex(FileNotFoundError, "CPython 3.12 PSF license"):
                 python_license_file((missing,))
 
     def test_pillow_notice_collection_preserves_layout_and_fails_closed(self) -> None:

@@ -4,7 +4,7 @@ Resolve Track Visualizer depends on and may bundle third-party software. Copyrig
 
 | Component | Use | License |
 | --- | --- | --- |
-| CPython 3.12.13 | Runtime bundled by PyInstaller | Python Software Foundation License 2.0 |
+| CPython 3.12 (3.12.10 on Windows/macOS; 3.12.13 on Linux) | Runtime bundled by PyInstaller | Python Software Foundation License 2.0 |
 | Mutagen | Audio metadata parsing | GPL-2.0-or-later |
 | Pillow 12.2.0 and its wheel-bundled native libraries | Image processing | See the exact wheel-provided license and copyright notices |
 | PyInstaller | Release build tool and bundled bootloader | GPL-2.0-or-later with the PyInstaller bootloader exception |

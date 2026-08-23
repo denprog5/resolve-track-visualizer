@@ -22,7 +22,7 @@ The requested version must exactly match `davinci_track_visualizer.__version__`.
 
 The Linux container is `quay.io/pypa/manylinux_2_28_x86_64:2026.05.01-1@sha256:1d3ecb1a3e411f58bc3fd36668d2976db869d64bceaf3486ef2541b0105d2d31`. The job fails unless the running libc reports exactly 2.28, and the packaged engine, runner, installer, FFmpeg, and smoke tests all run inside that environment. This supports a glibc 2.28 minimum claim; it does not make the binaries libc-independent or compatible with musl.
 
-CI and every release Python step use CPython 3.12.13. Release dependencies come only from wheels selected by `requirements-release.txt`; all direct and transitive versions and the exact wheels for the four native targets are SHA-256 locked.
+CI and release utility jobs use CPython 3.12.13. Native packages use the exact hosted runtimes available for each target: CPython 3.12.10 on Windows and macOS, and CPython 3.12.13 in the pinned manylinux image. Release dependencies come only from wheels selected by `requirements-release.txt`; all direct and transitive versions and the exact wheels for the four native targets are SHA-256 locked.
 
 The matrix is intentionally separate from PR CI because native packaging is comparatively expensive. A successful native build and smoke test does not establish compatibility with an untested Resolve host; only DaVinci Resolve Studio 20.2.1 has been verified.
 
