@@ -1,2 +1,2 @@
 -r requirements-build.txt
-luaparser==4.0.1
+luaparser==4.1.0
