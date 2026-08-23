@@ -245,6 +245,14 @@ jobs:
               raise SystemExit(f"Expected the pinned glibc 2.28 build environment, found {version}")
           print(f"glibc {version}")
           PY
+          workspace=$(pwd -P)
+          {
+            echo "TVIZ_PYTHON_PREFIX=$workspace/build/python/linux-x64/prefix"
+            echo "TVIZ_RELEASE_DIR=$workspace/build/release-output-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-linux-x64"
+            echo "TVIZ_FFMPEG=$workspace/build/ffmpeg/linux-x64/prefix/bin/ffmpeg"
+            echo "TVIZ_FFPROBE=$workspace/build/ffmpeg/linux-x64/prefix/bin/ffprobe"
+            echo "TVIZ_FFMPEG_LICENSE=$workspace/build/ffmpeg/source/ffmpeg-9.0.1/COPYING.GPLv3"
+          } >> "$GITHUB_ENV"
 
       - name: Verify exact Python runtime
         run: python -c "import os, platform; expected=os.environ['TVIZ_PYTHON_VERSION']; actual=platform.python_version(); assert actual == expected, f'Expected Python {expected}, found {actual}'"
@@ -293,7 +301,7 @@ jobs:
         if: matrix.target == 'linux-x64'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ env.TVIZ_PYTHON_PREFIX }}
+          path: build/python/linux-x64/prefix
           key: unsigned-cpython-${{ matrix.target }}-${{ env.PYTHON_SOURCE_SHA256 }}-${{ env.LIBFFI_SOURCE_SHA256 }}-${{ hashFiles('packaging/scripts/build_python.sh') }}-${{ matrix.toolchain_revision }}
 
       - name: Re-verify and extract FFmpeg source
