@@ -23,7 +23,7 @@ env:
   FFMPEG_VERSION: "9.0.1"
   FFMPEG_SOURCE_URL: https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz
   FFMPEG_SOURCE_SHA256: cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635
-  FFMPEG_BUILD_CONFIG: minimal-audio-overlay-nonetwork-r4
+  FFMPEG_BUILD_CONFIG: minimal-audio-overlay-nonetwork-r5
   MUTAGEN_VERSION: "1.47.0"
   MUTAGEN_SOURCE_URL: https://files.pythonhosted.org/packages/81/e6/64bc71b74eef4b68e61eb921dcf72dabd9e4ec4af1e11891bbd312ccbb77/mutagen-1.47.0.tar.gz
   MUTAGEN_SOURCE_SHA256: 719fadef0a978c31b4cf3c956261b3c58b6948b32023078a2117b1de09f0fc99

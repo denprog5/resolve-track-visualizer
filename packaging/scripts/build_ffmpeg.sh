@@ -164,10 +164,11 @@ export TZ=UTC
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1704067200}
 
 cd "$ffmpeg_build_dir"
-extra_configure_flags=()
+set --
 if [[ ${MSYSTEM:-} == UCRT64 ]]; then
-    extra_configure_flags+=(--extra-ldflags=-static)
+    set -- --extra-ldflags=-static
 fi
+# FFmpeg's pcm_s16le muxer component exposes the CLI format name s16le.
 "$ffmpeg_source_dir/configure" \
     --prefix="$prefix_dir" \
     --enable-gpl \
@@ -187,11 +188,11 @@ fi
     --enable-decoder=aac,alac,flac,mp3float,opus,pcm_s16be,pcm_s16le,rawvideo,vorbis \
     --enable-encoder=pcm_s16le,prores_ks,qtrle \
     --enable-demuxer=aac,aiff,flac,mov,mp3,ogg,rawvideo,wav \
-    --enable-muxer=mov,s16le \
+    --enable-muxer=mov,pcm_s16le \
     --enable-parser=aac,flac,mpegaudio,opus,vorbis \
     --enable-protocol=file,pipe \
     --enable-filter=abuffer,abuffersink,aformat,aresample,buffer,buffersink,format,scale \
-    "${extra_configure_flags[@]}"
+    "$@"
 
 make -j"$jobs"
 make install
