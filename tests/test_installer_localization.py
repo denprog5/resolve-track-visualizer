@@ -87,7 +87,11 @@ class InstallerLocalizationTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertFalse(install_root.exists())
         self.assertFalse(script_directory.exists())
-        return output.getvalue(), install_root.resolve(), script_directory.resolve()
+        return (
+            output.getvalue(),
+            installer._absolute_path(install_root),
+            installer._absolute_path(script_directory),
+        )
 
     def test_locale_normalization_selects_russian_only_for_russian_locale(self) -> None:
         russian_locales = ("ru", "ru-RU", "ru_RU.UTF-8", "ru@cyrillic", "Russian_Russia.1251")
