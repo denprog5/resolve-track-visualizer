@@ -16,8 +16,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
 
 env:
   FFMPEG_VERSION: "9.0.1"
@@ -143,7 +143,7 @@ jobs:
             build/dependency-source/Python-3.12.13.tar.xz
             build/dependency-source/libffi-3.4.8.tar.gz
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
   build:
     name: Build ${{ matrix.display_name }}
@@ -489,7 +489,7 @@ jobs:
           name: release-${{ matrix.target }}
           path: ${{ env.TVIZ_RELEASE_DIR }}/*
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
           include-hidden-files: true
 
   attest:
@@ -525,6 +525,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
+      actions: write
       contents: read
 
     steps:
@@ -579,7 +580,23 @@ jobs:
             artifacts/**/*
             SHA256SUMS
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
+
+      - name: Delete intermediate workflow artifacts
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          artifact_ids=$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.name == "native-dependency-sources" or (.name | startswith("release-"))) | .id')
+          while read -r artifact_id; do
+            if [[ -n "$artifact_id" ]]; then
+              gh api --method DELETE \
+                "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id" \
+                --silent
+            fi
+          done <<< "$artifact_ids"
 
   release-gate:
     name: Gate release publication
@@ -626,6 +643,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
+      actions: write
       contents: write
 
     steps:
@@ -733,3 +751,19 @@ jobs:
           if release.get("isDraft") is not False or release.get("isPrerelease") is not True:
               raise SystemExit(f"Release publication state is invalid: {release}")
           PY
+
+      - name: Delete published workflow artifacts
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          artifact_ids=$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[].id')
+          while read -r artifact_id; do
+            if [[ -n "$artifact_id" ]]; then
+              gh api --method DELETE \
+                "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id" \
+                --silent
+            fi
+          done <<< "$artifact_ids"
