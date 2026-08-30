@@ -104,6 +104,12 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("release-candidate", self.linux_canary_workflow)
         self.assertNotIn("push:", self.linux_canary_workflow)
 
+        for caller in (self.release_workflow, self.linux_canary_workflow):
+            caller_job = workflow_job(caller, "build")
+            self.assertIn("actions: write", caller_job)
+            self.assertIn("contents: read", caller_job)
+            self.assertLess(caller_job.index("actions: write"), caller_job.index("uses:"))
+
         self.assertIn("workflow_call:", self.workflow)
         self.assertNotIn("workflow_dispatch:", self.workflow)
         self.assertIn('(\"windows-x64\", \"release-candidate\")', self.workflow)

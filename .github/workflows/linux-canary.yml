@@ -16,6 +16,7 @@ jobs:
   build:
     name: Build private unpublished Linux x64 canary
     permissions:
+      actions: write
       contents: read
     uses: ./.github/workflows/native-build.yml
     with:

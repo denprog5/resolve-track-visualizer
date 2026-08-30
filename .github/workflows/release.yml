@@ -16,6 +16,7 @@ jobs:
   build:
     name: Build private Windows x64 release candidate
     permissions:
+      actions: write
       contents: read
     uses: ./.github/workflows/native-build.yml
     with:
