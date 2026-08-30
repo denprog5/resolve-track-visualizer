@@ -1,104 +1,74 @@
 # Release Process
 
-Release artifacts are preview builds and are not code-signed or notarized. The workflow does not create placeholder signatures.
+Native artifacts are unsigned internal validation builds. The workflows do not create or update Git tags, GitHub Releases, release drafts, attestations, or any other public distribution channel.
 
-## Triggers
+## Triggers And Publication Policy
 
-`.github/workflows/release.yml` supports:
+- `.github/workflows/release.yml` is manual-only and requests the Windows x64 release-candidate build.
+- `.github/workflows/linux-canary.yml` is a separate manual-only Linux x64 canary build. It is not a release candidate and is never included in Windows release-candidate artifacts.
+- `.github/workflows/native-build.yml` is reusable only through `workflow_call` and accepts exactly `windows-x64`/`release-candidate` or `linux-x64`/`canary`.
+- No native workflow has a tag trigger or write permission. Unsigned output is stored only as GitHub Actions artifacts with one-day retention.
 
-- Manual runs, which build and retain workflow artifacts without creating a GitHub Release.
-- Tags matching `v*.*.*`, which build artifacts and publish a GitHub prerelease.
+The reusable workflow validates the target/channel and requested version before building. Immediately before every artifact upload, it queries `GET /repos/{owner}/{repo}` with the read-only workflow token and fails unless the live `visibility` response is exactly `private`. An API failure, missing field, `public`, or `internal` response fails closed.
 
-The requested version must exactly match `davinci_track_visualizer.__version__`. For version `0.1.0`, the release tag is `v0.1.0`.
+Creating a public release remains disabled until an approved signing and publication process is implemented. A maintainer must not manually republish these unsigned workflow artifacts.
+
+Before changing repository visibility, maintainers must delete every retained native artifact and the workflow runs that produced them. The live pre-upload gate can prevent new exposure, but no workflow can protect artifacts or logs retained after a completed run if repository visibility later changes.
 
 ## Native Targets
 
-| Product target | GitHub-hosted runner | Native build environment | Recorded runtime baseline |
-| --- | --- | --- | --- |
-| Windows x64 | `windows-2025` | MSYS2 UCRT64 20260611, GCC 16.1.0-5 | Windows x64 with Universal CRT |
-| Linux x64 | `ubuntu-24.04` | pinned `manylinux_2_28_x86_64` container | glibc 2.28 or later |
-| macOS arm64 | `macos-15` | Xcode 16.4, build 16F6 | macOS 15 arm64 |
-| macOS Intel | `macos-15-intel` | Xcode 16.4, build 16F6 | macOS 15 x86_64 |
+| Channel | Product target | GitHub-hosted runner | Native build environment | Recorded runtime baseline |
+| --- | --- | --- | --- | --- |
+| Release candidate | Windows x64 | `windows-2025` | MSYS2 UCRT64 20260611, GCC 16.1.0-5 | Windows x64 with Universal CRT |
+| Manual unpublished canary | Linux x64 | `ubuntu-24.04` | pinned `manylinux_2_28_x86_64` container | glibc 2.28 or later |
 
-The Linux container is `quay.io/pypa/manylinux_2_28_x86_64:2026.05.01-1@sha256:1d3ecb1a3e411f58bc3fd36668d2976db869d64bceaf3486ef2541b0105d2d31`. The job fails unless the running libc reports exactly 2.28. Because the image's wheel-building Python does not provide the shared library required by PyInstaller, the job downloads official `Python-3.12.13.tar.xz`, verifies SHA-256 `c08bc65a81971c1dd5783182826503369466c7e67374d1646519adf05207b684`, and builds it with shared-library support inside the same container. The image intentionally omits libffi development files, so the build also verifies official `libffi-3.4.8.tar.gz` with SHA-256 `bc9842a18898bfacb0ed1252c4febcc7e78fa139fd27fdc7a3e30d9d9356119b`, builds it as a PIC static library, and requires a working `_ctypes` extension without a dynamic libffi dependency. The exact-verified image Python remains the utility runtime for the HTTPS-based Syft download; the custom shared runtime is used for PyInstaller and package validation. The exact CPython and libffi source archives are retained with the dependency source artifacts. The packaged engine, runner, installer, FFmpeg, and smoke tests all run inside that environment. This supports a glibc 2.28 minimum claim; it does not make the binaries libc-independent or compatible with musl.
+Windows x64 is the only release-candidate target. Linux x64 exists only as an independently requested canary for packaging feedback; it is not assembled with, promoted to, or published as a release candidate.
 
-CI and release utility jobs use CPython 3.12.13. Native packages use the exact hosted runtimes available for each target: CPython 3.12.10 on Windows and macOS, and CPython 3.12.13 in the pinned manylinux image. Release dependencies come only from wheels selected by `requirements-release.txt`; all direct and transitive versions and the exact wheels for the four native targets are SHA-256 locked.
+macOS is unsupported, no macOS build is produced, and it is outside the current platform and release scope.
 
-The matrix is intentionally separate from PR CI because native packaging is comparatively expensive. A successful native build and smoke test does not establish compatibility with an untested Resolve host; only DaVinci Resolve Studio 20.2.1 has been verified.
+The Linux container is `quay.io/pypa/manylinux_2_28_x86_64:2026.05.01-1@sha256:1d3ecb1a3e411f58bc3fd36668d2976db869d64bceaf3486ef2541b0105d2d31`. The job fails unless libc reports exactly 2.28. Because the image's wheel-building Python does not provide the shared library required by PyInstaller, the job verifies and builds official CPython 3.12.13 plus libffi 3.4.8 in the pinned container. The canary requires a working `_ctypes` extension without a dynamic libffi dependency. This supports a glibc 2.28 minimum claim; it does not make the binaries libc-independent or compatible with musl.
+
+Utility jobs use CPython 3.12.13. Windows native packaging does not trust the hosted toolcache: it downloads `python-3.12.10-amd64.exe` from python.org, verifies SHA-256 `67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb`, requires a valid Python Software Foundation Authenticode signer, and installs silently under the runner temporary directory. `PYTHONNOUSERSITE=1` is set before installation and remains set through dependency installation, PyInstaller builds, staging, and SBOM generation. Before `pip` runs, the workflow fails unless the installed runtime has user-site loading disabled and the normalized user-site directory is absent from effective `sys.path`; `scripts/build_release.py` repeats this fail-closed requirement. The workflow also verifies the installed runtime's version, 64-bit architecture, and Authenticode signer. The Windows CI job likewise sets `PYTHONNOUSERSITE=1` at job scope before `setup-python` and performs the same user-site checks before installing test dependencies. Linux native packaging uses CPython 3.12.13 in the pinned Linux environment. Release dependencies come only from wheels selected by `requirements-release.txt`; direct and transitive versions and exact wheels for the two build targets are SHA-256 locked.
+
+## CI Coverage
+
+Pushes to `main` and pull requests run the test suite and parse the Resolve Lua script with Python 3.12.10 on `windows-2025` and Python 3.12.13 on `ubuntu-24.04`. The Windows lane exercises the currently supported release platform; the Linux lane remains a fast cross-platform regression check. CI does not compile FFmpeg, package installers, or upload native artifacts.
+
+Native package smoke tests do not establish compatibility with an untested Resolve host. Only DaVinci Resolve Studio 20.2.1 on Windows x64 is currently verified. Resolve 21 testing is explicitly deferred and no Resolve 21 compatibility claim is made. The current UIManager interface requires Resolve Studio; Free support needs a separate UI architecture.
 
 ## Packaged Dependency Provenance
 
-The release uses the unmodified official FFmpeg 9.0.1 source archive:
+The build uses the unmodified official FFmpeg 9.0.1 source archive:
 
 - URL: `https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz`
 - SHA-256: `cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635`
 - Build recipe: `packaging/scripts/build_ffmpeg.sh`
 
-The prepare job downloads the archive and verifies its digest. Each target downloads that workflow artifact, verifies the digest again, extracts it, and builds natively. The exact archive is included in the assembled workflow bundle and published as a separate GitHub Release asset for tag builds, so corresponding source is distributed beside the binaries rather than relying only on an upstream link.
+The prepare job downloads and verifies the FFmpeg source plus exact corresponding source archives for Mutagen and the target's CPython runtime, then rejects any unexpected source file before internal transfer. The build job re-verifies archives before extracting them: FFmpeg on both targets, the bundled libffi/OpenSSL sources on Windows, and CPython/libffi on Linux when rebuilding the cached runtime. Mutagen and Windows CPython source archives are corresponding-source payloads rather than build inputs, so their exact prepare-job verification and artifact transfer integrity are retained without a redundant build-job extraction. Windows receives `Python-3.12.10.tar.xz` with SHA-256 `07ab697474595e06f06647417d3c7fa97ded07afc1a7e4454c5639919b46eaea`. It also receives the `python/cpython-source-deps` libffi 3.4.4 tag archive from `https://github.com/python/cpython-source-deps/archive/refs/tags/libffi-3.4.4.tar.gz` with SHA-256 `9d802681adfea27d84cae0487a785fb9caa925bdad44c401b364c59ab2b8edda`, and the OpenSSL 3.0.16 tag archive from `https://github.com/python/cpython-source-deps/archive/refs/tags/openssl-3.0.16.tar.gz` with SHA-256 `6bb739ecddbd2cfb6d255eb5898437a9b5739277dee931338d3275bac5d96ba2`; these versions and sources correspond to the official Python 3.12.10 installer SBOM. Their required archive roots are `cpython-source-deps-libffi-3.4.4` and `cpython-source-deps-openssl-3.0.16`. Before staging, the extracted libffi `LICENSE` and OpenSSL `LICENSE.txt` must match SHA-256 `2c9c2acb9743e6b007b91350475308aee44691d96aa20eacef8e199988c8c388` and `7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a`, respectively. Linux receives CPython 3.12.13 and libffi 3.4.8 source. These sources are included under `source/` in the assembled private Actions artifact; no source or binary artifact is publicly published.
 
-The bundled Mutagen library is GPL-2.0-or-later. The prepare job also downloads the exact PyPI `mutagen-1.47.0.tar.gz` source archive from `https://files.pythonhosted.org/packages/81/e6/64bc71b74eef4b68e61eb921dcf72dabd9e4ec4af1e11891bbd312ccbb77/mutagen-1.47.0.tar.gz` and verifies SHA-256 `719fadef0a978c31b4cf3c956261b3c58b6948b32023078a2117b1de09f0fc99`. That archive is published beside the binaries and recorded in each package as `MUTAGEN_SOURCE_OFFER.txt`.
+The recipe enables GPL and version-3 terms and builds the FFmpeg libraries statically into `ffmpeg` and `ffprobe`. It starts with `--disable-everything` and enables only the codecs, formats, filters, and local `file`/`pipe` protocols needed by the application. Shared libraries, autodetected optional libraries, network protocols, `ffplay`, x86 assembly dependencies, PNG, and zlib are disabled. Windows uses static linker flags so MinGW runtime DLLs are not redistributed; operating-system runtime libraries such as the Universal CRT and Linux libc remain dynamic platform dependencies.
 
-The recipe enables GPL and version-3 terms, builds the FFmpeg libraries statically into `ffmpeg` and `ffprobe`, and uses `--disable-everything` before enabling only the application allowlist. That allowlist covers AAC, ALAC, FLAC, MP3, Opus, Vorbis, and 16-bit PCM input decoding; AAC, AIFF, FLAC, MOV/M4A, MP3, Ogg, rawvideo, and WAV demuxing; mono `s16le` output; qtrle and `prores_ks` MOV overlay output; required conversion filters and parsers; and only `file`/`pipe` protocols. Shared libraries, autodetected optional libraries, network protocols, `ffplay`, and x86 assembly dependencies are disabled. The Windows build also uses static linker flags so MinGW runtime DLLs are not redistributed. PNG is handled by Pillow and is not enabled in FFmpeg, so the release FFmpeg has no zlib dependency. Operating-system runtime libraries such as libc, the Universal CRT, and macOS system libraries remain dynamic platform dependencies.
+After every build or cache restore, `packaging/scripts/build_ffmpeg.sh` rejects runtime dependencies outside the target's system-library allowlist. `scripts/build_release.py` rejects the wrong version, architecture, license/configuration, unexpected FFmpeg options, missing local protocols, or exposed network protocols. It also runs WAV decoding, alpha overlay encoding, and `ffprobe` capability tests based on application command shapes.
 
-After every build or cache restore, `packaging/scripts/build_ffmpeg.sh` rejects runtime dependencies outside platform system-library allowlists. In particular, Windows MinGW runtime DLLs, non-system macOS paths such as Homebrew, missing Linux libraries, and Linux libraries outside the glibc/GCC runtime allowlist fail the build. `scripts/build_release.py` rejects the wrong version, architecture, license/configuration, any configure option outside the exact recipe, missing local protocols, or exposed network protocols. It also executes capability tests based on the application command shapes:
+Packages contain `FFMPEG_BUILD_INFO.txt`, FFmpeg's GPLv3 license text, corresponding-source offers, dependency license texts, and the exact FFmpeg build script. Windows packages include the verified CPython-bundled libffi and OpenSSL notices as `licenses/libffi-LICENSE.txt` and `licenses/OpenSSL-LICENSE.txt`; Linux packages include the verified libffi notice. The manifest records the FFmpeg version, source URL and digest, and runtime baseline.
 
-- WAV input decoded and resampled to mono `s16le` on stdout;
-- RGBA rawvideo stdin and qtrle alpha MOV output;
-- RGBA rawvideo input and `prores_ks` 4444 alpha MOV output;
-- duration and tag JSON queries through `ffprobe`.
+## Cache And Build Policy
 
-Packages contain `FFMPEG_BUILD_INFO.txt`, FFmpeg's GPLv3 license text, `FFMPEG_SOURCE_OFFER.txt`, `MUTAGEN_SOURCE_OFFER.txt`, dependency license texts, and the exact FFmpeg build script. The release manifest records the FFmpeg version, source URL and digest, plus the runtime baseline.
+Only unsigned dependency build prefixes are cached. Cache keys include source versions and digests, target, explicit toolchain revision, configuration revision, build-script hashes, and, for the Linux CPython prefix, the `requirements-release.txt` hash; no broad restore keys are used. The Linux job deletes and recreates the target `site-packages` directory before reinstalling the current hash-locked requirements, so cached dependencies cannot override the lock. Windows verifies the exact MSYS2 GCC package, and Linux runs in the digest-pinned manylinux image. Sources are verified on every run, restored binaries are revalidated and exercised, and final product artifacts are never restored from cache.
 
-## Cache Policy
+The builder derives the product version from `davinci_track_visualizer.__version__`, detects the native host and architecture, and rejects unsupported or non-64-bit hosts. The workflow uses a run-specific output directory under `build/` and validates the exact target-specific artifact set after SBOM generation.
 
-Only the unsigned installed FFmpeg prefix is cached. The key includes the FFmpeg version and official source digest, configuration revision, target, explicit per-target toolchain revision, and the build-script hash; there are no broad restore keys. Windows verifies the exact MSYS2 GCC package, Linux runs in the digest-pinned manylinux image, and both macOS targets select and verify Xcode 16.4 build 16F6 before cache access. The toolchain revision is bumped whenever those inputs or the runner baseline change. Source is downloaded and verified on every workflow run, restored binaries are always revalidated and exercised, and final product artifacts are never restored from this cache.
+Windows output consists of the portable `.zip`, native `.exe` installer, and SPDX JSON SBOM. Linux canary output consists of the portable `.tar.gz`, native installer, mode-preserving installer `.tar.gz`, and SPDX JSON SBOM. The executable-bearing cross-job artifact is explicitly named as an internal transfer and contains `INTERNAL_SHA256SUMS`; assembly verifies that manifest covers its exact relative file set before copying files. The final private artifact contains one extracted-root layout: `artifacts/` for target outputs, `source/` for corresponding sources, and `SHA256SUMS` at the root. Final checksum records use paths relative to that root and are verified before upload.
 
-Expected hosted-runner timings are approximate and vary with repository visibility and runner allocation:
-
-| Run | Per-target work | Expected end-to-end wall time with four parallel targets |
-| --- | --- | --- |
-| Cold cache | FFmpeg 9-27 minutes, packaging/SBOM 5-10 minutes | about 20-42 minutes |
-| Warm cache | source verification under 1 minute, packaging/SBOM 5-10 minutes | about 8-15 minutes |
-
-Windows is normally the slowest cold target. Cache eviction, a recipe/source/toolchain change, or target-specific cache isolation causes a cold rebuild.
-
-## Builder Interface
-
-The workflow passes exact dependency inputs to the builder:
-
-```text
-python scripts/build_release.py \
-  --ffmpeg <target-prefix>/bin/ffmpeg \
-  --ffprobe <target-prefix>/bin/ffprobe \
-  --ffmpeg-license <ffmpeg-source>/COPYING.GPLv3 \
-  --ffmpeg-version 9.0.1 \
-  --ffmpeg-source-url https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz \
-  --ffmpeg-source-sha256 cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635 \
-  --runtime-baseline <target-baseline> \
-  --release-dir release
-```
-
-The builder derives the product version from `davinci_track_visualizer.__version__`, detects the native host/architecture, and rejects unsupported or non-64-bit hosts. The license, exact FFmpeg version, source URL, and source digest are mandatory. It also refuses to build into a nonempty output directory and never deletes stale user artifacts. The workflow uses a run-specific directory under the ignored workspace `build/` tree and, after generating the SBOM, requires the exact target-specific artifact set before upload.
-
-The builder produces:
-
-- a target-specific portable `.zip` on Windows or `.tar.gz` on Linux/macOS;
-- a target-specific native installer executable;
-- an additional `.tar.gz` around the installer on Linux/macOS so executable mode is preserved.
-
-The builder runs native engine, runner, installer dry-run, and FFmpeg capability smoke tests before output is accepted. The workflow generates SPDX JSON with official Syft 1.42.3 binaries. Each target archive is verified against a hardcoded SHA-256 and Anchore's checksum manifest; the manifest itself is pinned by SHA-256. No mutable installer script is executed. The workflow uploads per-target artifacts and creates `SHA256SUMS` over the assembled binaries plus exact FFmpeg and Mutagen sources. Duplicate filenames fail assembly because GitHub Release assets have a flat filename namespace.
-
-Tag publication fails if any release, including a draft, already exists for the tag. A new prerelease remains a draft while all current assets are uploaded and its remote asset names are compared with the assembled local set. Only that validated draft is published, so failed uploads cannot expose a partial release and reruns cannot retain stale assets.
+Package smoke testing installs into an isolated temporary directory, checks the staged runtime and nested notices, then runs `--uninstall`. The lifecycle check must preserve a user-data marker while removing installer-managed files and the Resolve menu script. It never installs into the runner account's real Resolve directories.
 
 ## Remaining Limitations
 
-- Builds are unsigned and macOS artifacts are not notarized.
-- FFmpeg is configured without x86 assembly, PNG/zlib, or optional external codec libraries. This improves provenance and portability at the cost of encoding/decoding performance and formats outside the application allowlist.
-- Runner operating-system images can change under fixed GitHub labels. The FFmpeg source/configuration, Linux/Windows dependency environments, and selected macOS Xcode build are pinned, but complete bit-for-bit reproducibility of PyInstaller output across future hosted-runner image revisions is not claimed.
-- The Windows UCRT and macOS system libraries are not statically linked. Linux requires glibc 2.28 or later and does not support musl.
-- Native smoke tests validate packaged behavior, not actual DaVinci Resolve integration on every target.
-- `macos-15-intel` is GitHub's final Intel label and is currently scheduled only through August 2027; the target needs another builder after that service ends.
-
-## Attestations
-
-Build provenance attestations cover the complete assembled release bundle, including corresponding source archives and `SHA256SUMS`. They run automatically for public repositories and publication is gated on their success. GitHub currently requires GitHub Enterprise Cloud for attestations from private repositories; an eligible private repository can set the repository variable `ENABLE_PRIVATE_ATTESTATIONS=true`. Private repositories without that setting intentionally skip attestation, and a separate gate allows publication only for that explicit skip. Attestations are not a substitute for code signing.
+- All native artifacts are unsigned and restricted to short-lived private Actions storage.
+- No automated or tag-driven public release path exists.
+- macOS is unsupported, unbuilt, and outside the current release scope.
+- FFmpeg omits x86 assembly and optional codecs, which improves provenance and portability at the cost of performance and unsupported formats.
+- Hosted runner images can change under fixed labels, so complete bit-for-bit reproducibility across future image revisions is not claimed.
+- Linux requires glibc 2.28 or later and does not support musl.
+- Native smoke tests validate packaged behavior, not integration with DaVinci Resolve.
+- Resolve 21 validation is deferred.

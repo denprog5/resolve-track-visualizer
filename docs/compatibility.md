@@ -5,12 +5,13 @@ Resolve Track Visualizer relies on the Resolve scripting API, UIManager, Media P
 | Environment | Status | Notes |
 | --- | --- | --- |
 | DaVinci Resolve Studio 20.2.1, Windows x64 | Verified | UI, 49-track production probe, helper sharding, three skins, project save/reload, and installed runtime tested. |
-| DaVinci Resolve Free 20.2.1 | Not yet verified | The menu-script architecture is intended to avoid Workflow Integration requirements, but no release certification has been run. |
+| DaVinci Resolve Free 20/21 | Not supported by the current UI | Blackmagic restricts the UIManager interface used by this plugin to Resolve Studio. Free support requires a separate UI architecture. |
 | DaVinci Resolve 20 versions older than 20.2.1 | Not supported yet | No compatibility claim until host probes pass on the exact version. |
-| DaVinci Resolve 21 | Not yet verified | Must pass UI and production probes before it is added to the supported matrix. |
+| DaVinci Resolve 21 | Testing deferred | Resolve 21 validation is outside the current release scope; no compatibility claim is made. |
 | DaVinci Resolve 19 and older | Not supported | No test coverage and no compatibility promise. |
-| macOS and Linux Resolve hosts | Packaging preview | Native artifacts are built and package-smoke-tested, but Resolve integration still needs manual host certification. |
+| Linux Resolve hosts | Not verified | A manual unpublished Linux x64 packaging canary exists, but Resolve integration testing is deferred. |
+| macOS Resolve hosts | Unsupported and unbuilt | macOS is outside the current platform and release scope; no native workflow or artifact exists. |
 
-Both Resolve Studio and Free status must be reported separately. A successful unit test, Lua parse, or PyInstaller build does not change this matrix.
+Only DaVinci Resolve Studio 20.2.1 on Windows x64 is currently verified. A successful unit test, Lua parse, or PyInstaller build does not change this matrix.
 
 For a new supported host, run the UI localization probe in English and Russian, the live Fusion host probe, and the 49-track production/reload probe before updating this document.

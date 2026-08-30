@@ -173,20 +173,43 @@ class LuaPortabilityTests(unittest.TestCase):
         self.assertEqual(self.source.count("os.remove("), 1)
         self.assertEqual(self.source.count("os.rename("), 1)
 
-    def test_windows_color_picker_runs_powershell_through_runner(self) -> None:
+    def test_windows_color_picker_runs_powershell_through_runner_safely(self) -> None:
         picker = self.source[
-            self.source.index("local function pick_windows_color") : self.source.index(
+            self.source.index("local function windows_powershell_path") : self.source.index(
                 "local function read_design_from_ui"
             )
         ]
-        self.assertIn('"powershell.exe", "-NoProfile"', picker)
+        self.assertIn('ipairs({ "SystemRoot", "WINDIR" })', picker)
+        self.assertIn("is_absolute_path(system_root)", picker)
+        self.assertIn('path_join(path_join(system_root, "System32"), "WindowsPowerShell")', picker)
+        self.assertIn('path_join(path_join(directory, "v1.0"), "powershell.exe")', picker)
+        self.assertIn("if file_exists(candidate) then return candidate end", picker)
+        self.assertIn('if powershell_path == "" then', picker)
+        self.assertIn(
+            """command = {
+                powershell_path, "-NoLogo", "-NoProfile", "-NonInteractive",
+                "-Sta", "-WindowStyle", "Hidden", "-File", script_path,
+                "-ResultPath", result_path,
+            },""",
+            picker,
+        )
         self.assertIn("run_runner_config({", picker)
         self.assertIn('"-File", script_path', picker)
         self.assertIn('"-ResultPath", result_path', picker)
         self.assertIn("param([string]$ResultPath)", picker)
+        self.assertIn("Set-Content -LiteralPath $ResultPath", picker)
         self.assertIn('"picked_color_" .. picker_stem .. ".txt"', picker)
         self.assertIn("remove_file(result_path)", picker)
+        self.assertIn("remove_file(script_path)", picker)
+        self.assertIn("if not picker_ok then error(selected) end", picker)
         self.assertNotIn("os.execute", picker)
+        self.assertNotIn('"powershell.exe", "-NoLogo"', picker)
+        self.assertNotIn('"-Command"', picker)
+        self.assertNotIn('"-EncodedCommand"', picker)
+
+    def test_windows_color_picker_does_not_override_execution_policy(self) -> None:
+        self.assertNotIn("ExecutionPolicy", self.source)
+        self.assertNotRegex(self.source, r'(?i)["\']bypass["\']')
 
     def test_runner_uses_unique_files_and_strict_completion_json(self) -> None:
         runner = self.source[
@@ -212,6 +235,19 @@ class LuaPortabilityTests(unittest.TestCase):
         self.assertIn("if not PLATFORM.windows then", picker)
         self.assertIn('tr("notice.color_manual")', picker)
         self.assertNotIn("powershell.exe", picker)
+
+    def test_windows_color_picker_failure_falls_back_to_manual_input(self) -> None:
+        picker = self.source[
+            self.source.index("function HANDLERS.pick_color_safely") : self.source.index(
+                "function HANDLERS.run_plugin"
+            )
+        ]
+        self.assertIn("local ok, err = pcall", picker)
+        self.assertRegex(
+            picker,
+            r'if not ok then\s+report_error\(err\)\s+local notice = tr\("notice\.color_manual"\)',
+        )
+        self.assertIn("set_progress(0, notice)", picker)
 
     def test_no_raw_russian_text_exists_outside_ru_catalog(self) -> None:
         start = self.source.index("    ru = {")

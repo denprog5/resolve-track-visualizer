@@ -14,14 +14,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Python tests and Lua parse
+  linux-test:
+    name: Fast Linux tests and Lua parse
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -29,6 +31,9 @@ jobs:
           python-version: "3.12.13"
           cache: pip
           cache-dependency-path: requirements.txt
+
+      - name: Verify exact Python runtime
+        run: python -c "import platform; expected='3.12.13'; actual=platform.python_version(); assert actual == expected, f'Expected Python {expected}, found {actual}'"
 
       - name: Install test dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt "luaparser==4.0.1"
@@ -46,3 +51,61 @@ jobs:
           ast.parse(source.read_text(encoding="utf-8"))
           print(f"Parsed {source}")
           PY
+
+  windows-test:
+    name: Windows x64 tests and Lua parse
+    runs-on: windows-2025
+    timeout-minutes: 15
+    env:
+      PYTHONNOUSERSITE: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.10"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Verify exact Python runtime and user-site isolation
+        shell: pwsh
+        run: |
+          @'
+          import os
+          import platform
+          import site
+          import sys
+
+          expected = "3.12.10"
+          actual = platform.python_version()
+          if actual != expected:
+              raise SystemExit(f"Expected Python {expected}, found {actual}")
+          if os.environ.get("PYTHONNOUSERSITE") != "1":
+              raise SystemExit("PYTHONNOUSERSITE must be exactly 1")
+          if site.ENABLE_USER_SITE is not False:
+              raise SystemExit(f"Python user site is not disabled: {site.ENABLE_USER_SITE!r}")
+
+          normalize = lambda value: os.path.normcase(os.path.realpath(os.path.abspath(value)))
+          user_site = normalize(site.getusersitepackages())
+          effective_path = {normalize(value) for value in sys.path if value}
+          if user_site in effective_path:
+              raise SystemExit(f"Python user site is present on sys.path: {user_site}")
+          print("Windows CI Python user site is disabled and absent from sys.path")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt "luaparser==4.0.1"
+
+      - name: Run Python tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Parse Resolve Lua script
+        run: python -c "from pathlib import Path; from luaparser import ast; source = Path('resolve_scripts/Track Visualizer.lua'); ast.parse(source.read_text(encoding='utf-8')); print(f'Parsed {source}')"

@@ -1,0 +1,1113 @@
+name: Reusable native artifact build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version matching davinci_track_visualizer.__version__
+        required: true
+        type: string
+      target:
+        description: Approved native target
+        required: true
+        type: string
+      channel:
+        description: Private artifact channel
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ inputs.channel }}-${{ inputs.target }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FFMPEG_VERSION: "9.0.1"
+  FFMPEG_SOURCE_URL: https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz
+  FFMPEG_SOURCE_SHA256: cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635
+  FFMPEG_BUILD_CONFIG: minimal-audio-overlay-nonetwork-r5
+  MUTAGEN_VERSION: "1.47.0"
+  MUTAGEN_SOURCE_URL: https://files.pythonhosted.org/packages/81/e6/64bc71b74eef4b68e61eb921dcf72dabd9e4ec4af1e11891bbd312ccbb77/mutagen-1.47.0.tar.gz
+  MUTAGEN_SOURCE_SHA256: 719fadef0a978c31b4cf3c956261b3c58b6948b32023078a2117b1de09f0fc99
+  PYTHON_SOURCE_VERSION: ${{ inputs.target == 'windows-x64' && '3.12.10' || '3.12.13' }}
+  PYTHON_SOURCE_URL: ${{ inputs.target == 'windows-x64' && 'https://www.python.org/ftp/python/3.12.10/Python-3.12.10.tar.xz' || 'https://www.python.org/ftp/python/3.12.13/Python-3.12.13.tar.xz' }}
+  PYTHON_SOURCE_SHA256: ${{ inputs.target == 'windows-x64' && '07ab697474595e06f06647417d3c7fa97ded07afc1a7e4454c5639919b46eaea' || 'c08bc65a81971c1dd5783182826503369466c7e67374d1646519adf05207b684' }}
+  WINDOWS_PYTHON_INSTALLER_URL: https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe
+  WINDOWS_PYTHON_INSTALLER_SHA256: 67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb
+  WINDOWS_LIBFFI_SOURCE_URL: https://github.com/python/cpython-source-deps/archive/refs/tags/libffi-3.4.4.tar.gz
+  WINDOWS_LIBFFI_SOURCE_SHA256: 9d802681adfea27d84cae0487a785fb9caa925bdad44c401b364c59ab2b8edda
+  WINDOWS_OPENSSL_SOURCE_URL: https://github.com/python/cpython-source-deps/archive/refs/tags/openssl-3.0.16.tar.gz
+  WINDOWS_OPENSSL_SOURCE_SHA256: 6bb739ecddbd2cfb6d255eb5898437a9b5739277dee931338d3275bac5d96ba2
+  LIBFFI_SOURCE_URL: https://github.com/libffi/libffi/releases/download/v3.4.8/libffi-3.4.8.tar.gz
+  LIBFFI_SOURCE_SHA256: bc9842a18898bfacb0ed1252c4febcc7e78fa139fd27fdc7a3e30d9d9356119b
+  SYFT_VERSION: "1.42.3"
+  SYFT_RELEASE_BASE_URL: https://github.com/anchore/syft/releases/download/v1.42.3
+  SYFT_CHECKSUMS_URL: https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_checksums.txt
+  SYFT_CHECKSUMS_SHA256: 3c4a66ddb6e0689fac2be19247064f6053e2a2746035dfbcef8609baa9088f92
+
+jobs:
+  prepare:
+    name: Validate version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+
+      - name: Verify exact Python runtime
+        run: python -c "import platform; expected='3.12.13'; actual=platform.python_version(); assert actual == expected, f'Expected Python {expected}, found {actual}'"
+
+      - name: Validate private build request
+        id: version
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          INPUT_VERSION: ${{ inputs.version }}
+          REPOSITORY_VISIBILITY: ${{ github.repository_visibility }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          match = re.fullmatch(
+              r'__version__\s*=\s*["\']([^"\']+)["\']\s*',
+              Path("davinci_track_visualizer/__init__.py").read_text(encoding="utf-8").strip(),
+          )
+          if not match:
+              raise SystemExit("Could not read davinci_track_visualizer.__version__")
+          source_version = match.group(1)
+          if os.environ["REPOSITORY_VISIBILITY"] != "private":
+              raise SystemExit("Unsigned artifacts may be built only in a private repository")
+          request = (os.environ["TARGET"], os.environ["CHANNEL"])
+          allowed = {
+              ("windows-x64", "release-candidate"),
+              ("linux-x64", "canary"),
+          }
+          if request not in allowed:
+              raise SystemExit(f"Unsupported native artifact request: {request}")
+          requested = os.environ["INPUT_VERSION"].strip()
+          version_pattern = r"(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){2}(?:-[0-9A-Za-z.-]+)?"
+          if not re.fullmatch(version_pattern, requested):
+              raise SystemExit(f"Version is not supported semantic version syntax: {requested}")
+          if requested != source_version:
+              raise SystemExit(
+                  f"Requested version {requested} does not match source version {source_version}"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={requested}\n")
+          PY
+
+      - name: Download and verify official FFmpeg source
+        run: >-
+          python packaging/scripts/prepare_dependency_source.py
+          --archive build/dependency-source/ffmpeg-9.0.1.tar.xz
+          --url "${{ env.FFMPEG_SOURCE_URL }}"
+          --sha256 "${{ env.FFMPEG_SOURCE_SHA256 }}"
+          --archive-root ffmpeg-9.0.1
+          --required-file VERSION
+          --download
+
+      - name: Download and verify exact Mutagen corresponding source
+        run: >-
+          python packaging/scripts/prepare_dependency_source.py
+          --archive build/dependency-source/mutagen-1.47.0.tar.gz
+          --url "${{ env.MUTAGEN_SOURCE_URL }}"
+          --sha256 "${{ env.MUTAGEN_SOURCE_SHA256 }}"
+          --archive-root mutagen-1.47.0
+          --required-file COPYING
+          --download
+
+      - name: Download and verify exact CPython source
+        run: >-
+          python packaging/scripts/prepare_dependency_source.py
+          --archive build/dependency-source/Python-${{ env.PYTHON_SOURCE_VERSION }}.tar.xz
+          --url "${{ env.PYTHON_SOURCE_URL }}"
+          --sha256 "${{ env.PYTHON_SOURCE_SHA256 }}"
+          --archive-root Python-${{ env.PYTHON_SOURCE_VERSION }}
+          --required-file LICENSE
+          --download
+
+      - name: Download and verify exact Windows bundled libffi source
+        if: inputs.target == 'windows-x64'
+        run: >-
+          python packaging/scripts/prepare_dependency_source.py
+          --archive build/dependency-source/cpython-source-deps-libffi-3.4.4.tar.gz
+          --url "${{ env.WINDOWS_LIBFFI_SOURCE_URL }}"
+          --sha256 "${{ env.WINDOWS_LIBFFI_SOURCE_SHA256 }}"
+          --archive-root cpython-source-deps-libffi-3.4.4
+          --required-file LICENSE
+          --download
+
+      - name: Download and verify exact Windows bundled OpenSSL source
+        if: inputs.target == 'windows-x64'
+        run: >-
+          python packaging/scripts/prepare_dependency_source.py
+          --archive build/dependency-source/cpython-source-deps-openssl-3.0.16.tar.gz
+          --url "${{ env.WINDOWS_OPENSSL_SOURCE_URL }}"
+          --sha256 "${{ env.WINDOWS_OPENSSL_SOURCE_SHA256 }}"
+          --archive-root cpython-source-deps-openssl-3.0.16
+          --required-file LICENSE.txt
+          --download
+
+      - name: Download and verify exact libffi source
+        if: inputs.target == 'linux-x64'
+        run: >-
+          python packaging/scripts/prepare_dependency_source.py
+          --archive build/dependency-source/libffi-3.4.8.tar.gz
+          --url "${{ env.LIBFFI_SOURCE_URL }}"
+          --sha256 "${{ env.LIBFFI_SOURCE_SHA256 }}"
+          --archive-root libffi-3.4.8
+          --required-file LICENSE
+          --download
+
+      - name: Validate exact dependency source set
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          expected = {
+              "ffmpeg-9.0.1.tar.xz",
+              "mutagen-1.47.0.tar.gz",
+              f"Python-{os.environ['PYTHON_SOURCE_VERSION']}.tar.xz",
+          }
+          if os.environ["TARGET"] == "linux-x64":
+              expected.add("libffi-3.4.8.tar.gz")
+          elif os.environ["TARGET"] == "windows-x64":
+              expected.update(
+                  {
+                      "cpython-source-deps-libffi-3.4.4.tar.gz",
+                      "cpython-source-deps-openssl-3.0.16.tar.gz",
+                  }
+              )
+          root = Path("build/dependency-source")
+          if root.is_symlink() or not root.is_dir():
+              raise SystemExit(f"Dependency source root is missing or invalid: {root}")
+          entries = list(root.iterdir())
+          actual = {path.name for path in entries}
+          invalid = sorted(
+              path.name for path in entries if path.is_symlink() or not path.is_file()
+          )
+          if invalid or actual != expected:
+              raise SystemExit(
+                  f"Dependency source set mismatch: expected={sorted(expected)}, "
+                  f"actual={sorted(actual)}, invalid={invalid}"
+              )
+
+          checksums = []
+          for name in sorted(actual):
+              digest = hashlib.sha256()
+              with (root / name).open("rb") as handle:
+                  while chunk := handle.read(1024 * 1024):
+                      digest.update(chunk)
+              checksums.append(f"{digest.hexdigest()}  {name}")
+          manifest = root / "INTERNAL_SHA256SUMS"
+          manifest.write_text("\n".join(checksums) + "\n", encoding="ascii")
+          print(f"Wrote {manifest} with {len(checksums)} archive checksums")
+          PY
+
+      - name: Verify internal dependency source checksum manifest
+        working-directory: build/dependency-source
+        run: sha256sum -c INTERNAL_SHA256SUMS
+
+      - name: Re-query live repository visibility before source upload
+        env:
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          request = urllib.request.Request(
+              f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{os.environ['GITHUB_REPOSITORY']}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              repository = json.load(response)
+          if repository.get("visibility") != "private":
+              raise SystemExit(
+                  f"Refusing unsigned artifact upload: live visibility is {repository.get('visibility')!r}"
+              )
+          print("Live repository visibility is private")
+          PY
+
+      - name: Upload internal dependency corresponding sources
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: internal-native-sources-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
+          path: build/dependency-source/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: Build ${{ inputs.target }}
+    needs: prepare
+    runs-on: ${{ inputs.target == 'windows-x64' && 'windows-2025' || 'ubuntu-24.04' }}
+    container: ${{ inputs.target == 'linux-x64' && 'quay.io/pypa/manylinux_2_28_x86_64:2026.05.01-1@sha256:1d3ecb1a3e411f58bc3fd36668d2976db869d64bceaf3486ef2541b0105d2d31' || '' }}
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    env:
+      TVIZ_VERSION: ${{ needs.prepare.outputs.version }}
+      TVIZ_TARGET: ${{ inputs.target }}
+      TVIZ_PYTHON_VERSION: ${{ inputs.target == 'windows-x64' && '3.12.10' || '3.12.13' }}
+      TVIZ_PYTHON_PREFIX: ${{ github.workspace }}/build/python/${{ inputs.target }}/prefix
+      TVIZ_RELEASE_DIR: ${{ github.workspace }}/build/release-output-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
+      TVIZ_FFMPEG: ${{ github.workspace }}/build/ffmpeg/${{ inputs.target }}/prefix/bin/ffmpeg${{ inputs.target == 'windows-x64' && '.exe' || '' }}
+      TVIZ_FFPROBE: ${{ github.workspace }}/build/ffmpeg/${{ inputs.target }}/prefix/bin/ffprobe${{ inputs.target == 'windows-x64' && '.exe' || '' }}
+      TVIZ_FFMPEG_LICENSE: ${{ github.workspace }}/build/ffmpeg/source/ffmpeg-9.0.1/COPYING.GPLv3
+      TVIZ_FFMPEG_VERSION: "9.0.1"
+      TVIZ_FFMPEG_SOURCE_URL: https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz
+      TVIZ_FFMPEG_SOURCE_SHA256: cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635
+      TVIZ_RUNTIME_BASELINE: ${{ inputs.target == 'windows-x64' && 'Windows x64 with Universal CRT' || 'glibc 2.28 or later' }}
+      TVIZ_TOOLCHAIN_REVISION: ${{ inputs.target == 'windows-x64' && 'msys2-20260611-gcc-16.1.0-5' || 'manylinux-2_28-2026.05.01-1-1d3ecb1a' }}
+      TVIZ_SYFT_ARCHIVE: ${{ inputs.target == 'windows-x64' && 'syft_1.42.3_windows_amd64.zip' || 'syft_1.42.3_linux_amd64.tar.gz' }}
+      TVIZ_SYFT_MEMBER: ${{ inputs.target == 'windows-x64' && 'syft.exe' || 'syft' }}
+      TVIZ_SYFT_SHA256: ${{ inputs.target == 'windows-x64' && 'e1b9f4945aa64c2b34970bec617623d7f803d0661b48a50b966768b363322e2d' || '0d6be741479eddd2c8644a288990c04f3df0d609bbc1599a005532a9dff63509' }}
+      SOURCE_DATE_EPOCH: "1704067200"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download and verify official Windows Python installer
+        if: inputs.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $installer = Join-Path $env:RUNNER_TEMP "python-3.12.10-amd64.exe"
+          Invoke-WebRequest -Uri $env:WINDOWS_PYTHON_INSTALLER_URL -OutFile $installer
+          $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $env:WINDOWS_PYTHON_INSTALLER_SHA256) {
+            throw "Windows Python installer SHA-256 mismatch: expected $env:WINDOWS_PYTHON_INSTALLER_SHA256, found $actualHash"
+          }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne "Valid" -or $null -eq $signature.SignerCertificate) {
+            throw "Windows Python installer Authenticode signature is not valid: $($signature.Status)"
+          }
+          $signer = $signature.SignerCertificate.GetNameInfo(
+            [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+            $false
+          )
+          if ($signer -ne "Python Software Foundation") {
+            throw "Unexpected Windows Python installer signer: $signer"
+          }
+          "TVIZ_WINDOWS_PYTHON_INSTALLER=$installer" >> $env:GITHUB_ENV
+          "PYTHONNOUSERSITE=1" >> $env:GITHUB_ENV
+
+      - name: Install pinned Windows Python into runner temp
+        if: inputs.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $target = Join-Path $env:RUNNER_TEMP "python-3.12.10-amd64"
+          if (Test-Path -LiteralPath $target) {
+            throw "Refusing to install into existing path: $target"
+          }
+          $arguments = @(
+            "/quiet",
+            "InstallAllUsers=0",
+            "TargetDir=$target",
+            "Include_launcher=0",
+            "InstallLauncherAllUsers=0",
+            "Include_test=0",
+            "Include_doc=0",
+            "Shortcuts=0",
+            "AssociateFiles=0",
+            "PrependPath=0"
+          )
+          $process = Start-Process -FilePath $env:TVIZ_WINDOWS_PYTHON_INSTALLER -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Windows Python installer exited with code $($process.ExitCode)"
+          }
+          $python = Join-Path $target "python.exe"
+          if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            throw "Installed Windows Python runtime was not found: $python"
+          }
+          "TVIZ_WINDOWS_PYTHON=$python" >> $env:GITHUB_ENV
+          $target >> $env:GITHUB_PATH
+          (Join-Path $target "Scripts") >> $env:GITHUB_PATH
+
+      - name: Verify installed Windows Python runtime and signature
+        if: inputs.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $signature = Get-AuthenticodeSignature -LiteralPath $env:TVIZ_WINDOWS_PYTHON
+          if ($signature.Status -ne "Valid" -or $null -eq $signature.SignerCertificate) {
+            throw "Installed Windows Python Authenticode signature is not valid: $($signature.Status)"
+          }
+          $signer = $signature.SignerCertificate.GetNameInfo(
+            [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+            $false
+          )
+          if ($signer -ne "Python Software Foundation") {
+            throw "Unexpected installed Windows Python signer: $signer"
+          }
+          @'
+          import os
+          import platform
+          import site
+          import struct
+          import sys
+
+          expected = "3.12.10"
+          actual = platform.python_version()
+          if actual != expected:
+              raise SystemExit(f"Expected Python {expected}, found {actual}")
+          if struct.calcsize("P") * 8 != 64:
+              raise SystemExit("Expected 64-bit Python")
+          if platform.machine().lower() not in {"amd64", "x86_64"}:
+              raise SystemExit(f"Unexpected Python architecture: {platform.machine()}")
+          if os.environ.get("PYTHONNOUSERSITE") != "1":
+              raise SystemExit("PYTHONNOUSERSITE must be exactly 1")
+          if site.ENABLE_USER_SITE is not False:
+              raise SystemExit(f"Python user site is not disabled: {site.ENABLE_USER_SITE!r}")
+
+          normalize = lambda value: os.path.normcase(os.path.realpath(os.path.abspath(value)))
+          user_site = normalize(site.getusersitepackages())
+          effective_path = {normalize(value) for value in sys.path if value}
+          if user_site in effective_path:
+              raise SystemExit(f"Python user site is present on sys.path: {user_site}")
+          print("Official Windows Python user site is disabled and absent from sys.path")
+          '@ | & $env:TVIZ_WINDOWS_PYTHON -
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Select manylinux Python and verify glibc baseline
+        if: inputs.target == 'linux-x64'
+        run: |
+          test -x /opt/python/cp312-cp312/bin/python
+          echo "/opt/python/cp312-cp312/bin" >> "$GITHUB_PATH"
+          /opt/python/cp312-cp312/bin/python - <<'PY'
+          import ctypes
+
+          libc = ctypes.CDLL("libc.so.6")
+          libc.gnu_get_libc_version.restype = ctypes.c_char_p
+          version = libc.gnu_get_libc_version().decode("ascii")
+          if version != "2.28":
+              raise SystemExit(f"Expected the pinned glibc 2.28 build environment, found {version}")
+          print(f"glibc {version}")
+          PY
+          workspace=$(pwd -P)
+          {
+            echo "TVIZ_PYTHON_PREFIX=$workspace/build/python/linux-x64/prefix"
+            echo "TVIZ_RELEASE_DIR=$workspace/build/release-output-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-linux-x64"
+            echo "TVIZ_FFMPEG=$workspace/build/ffmpeg/linux-x64/prefix/bin/ffmpeg"
+            echo "TVIZ_FFPROBE=$workspace/build/ffmpeg/linux-x64/prefix/bin/ffprobe"
+            echo "TVIZ_FFMPEG_LICENSE=$workspace/build/ffmpeg/source/ffmpeg-9.0.1/COPYING.GPLv3"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify exact Python runtime
+        if: inputs.target == 'linux-x64'
+        run: python -c "import os, platform; expected=os.environ['TVIZ_PYTHON_VERSION']; actual=platform.python_version(); assert actual == expected, f'Expected Python {expected}, found {actual}'"
+
+      - name: Set up pinned MSYS2 UCRT64 GCC toolchain
+        if: inputs.target == 'windows-x64'
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0, MSYS2 20260611
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            diffutils
+            make
+            mingw-w64-ucrt-x86_64-gcc
+          cache: false
+
+      - name: Verify pinned Windows compiler
+        if: inputs.target == 'windows-x64'
+        shell: msys2 {0}
+        run: |
+          test "$(pacman -Q mingw-w64-ucrt-x86_64-gcc)" = "mingw-w64-ucrt-x86_64-gcc 16.1.0-5"
+          gcc --version
+
+      - name: Download verified dependency source artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: internal-native-sources-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
+          path: build/dependency-source
+
+      - name: Restore shared CPython build
+        id: python-cache
+        if: inputs.target == 'linux-x64'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/python/linux-x64/prefix
+          key: unsigned-cpython-${{ inputs.target }}-${{ env.PYTHON_SOURCE_SHA256 }}-${{ env.LIBFFI_SOURCE_SHA256 }}-${{ hashFiles('packaging/scripts/build_python.sh') }}-${{ hashFiles('requirements-release.txt') }}-${{ env.TVIZ_TOOLCHAIN_REVISION }}
+
+      - name: Re-verify and extract FFmpeg source on Linux
+        if: inputs.target == 'linux-x64'
+        run: >-
+          python packaging/scripts/prepare_dependency_source.py
+          --archive build/dependency-source/ffmpeg-9.0.1.tar.xz
+          --url "${{ env.FFMPEG_SOURCE_URL }}"
+          --sha256 "${{ env.FFMPEG_SOURCE_SHA256 }}"
+          --archive-root ffmpeg-9.0.1
+          --required-file VERSION
+          --extract-to build/ffmpeg/source
+
+      - name: Re-verify and extract FFmpeg source on Windows
+        if: inputs.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          & $env:TVIZ_WINDOWS_PYTHON packaging/scripts/prepare_dependency_source.py `
+            --archive build/dependency-source/ffmpeg-9.0.1.tar.xz `
+            --url $env:FFMPEG_SOURCE_URL `
+            --sha256 $env:FFMPEG_SOURCE_SHA256 `
+            --archive-root ffmpeg-9.0.1 `
+            --required-file VERSION `
+            --extract-to build/ffmpeg/source
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Re-verify and extract Windows bundled libffi source
+        if: inputs.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          & $env:TVIZ_WINDOWS_PYTHON packaging/scripts/prepare_dependency_source.py `
+            --archive build/dependency-source/cpython-source-deps-libffi-3.4.4.tar.gz `
+            --url $env:WINDOWS_LIBFFI_SOURCE_URL `
+            --sha256 $env:WINDOWS_LIBFFI_SOURCE_SHA256 `
+            --archive-root cpython-source-deps-libffi-3.4.4 `
+            --required-file LICENSE `
+            --extract-to build/python/source
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Re-verify and extract Windows bundled OpenSSL source
+        if: inputs.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          & $env:TVIZ_WINDOWS_PYTHON packaging/scripts/prepare_dependency_source.py `
+            --archive build/dependency-source/cpython-source-deps-openssl-3.0.16.tar.gz `
+            --url $env:WINDOWS_OPENSSL_SOURCE_URL `
+            --sha256 $env:WINDOWS_OPENSSL_SOURCE_SHA256 `
+            --archive-root cpython-source-deps-openssl-3.0.16 `
+            --required-file LICENSE.txt `
+            --extract-to build/python/source
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Re-verify and extract CPython source for Linux
+        if: inputs.target == 'linux-x64' && steps.python-cache.outputs.cache-hit != 'true'
+        run: >-
+          python packaging/scripts/prepare_dependency_source.py
+          --archive build/dependency-source/Python-${{ env.PYTHON_SOURCE_VERSION }}.tar.xz
+          --url "${{ env.PYTHON_SOURCE_URL }}"
+          --sha256 "${{ env.PYTHON_SOURCE_SHA256 }}"
+          --archive-root Python-${{ env.PYTHON_SOURCE_VERSION }}
+          --required-file LICENSE
+          --extract-to build/python/source
+
+      - name: Re-verify and extract libffi source for Linux
+        if: inputs.target == 'linux-x64' && steps.python-cache.outputs.cache-hit != 'true'
+        run: >-
+          python packaging/scripts/prepare_dependency_source.py
+          --archive build/dependency-source/libffi-3.4.8.tar.gz
+          --url "${{ env.LIBFFI_SOURCE_URL }}"
+          --sha256 "${{ env.LIBFFI_SOURCE_SHA256 }}"
+          --archive-root libffi-3.4.8
+          --required-file LICENSE
+          --extract-to build/python/source
+
+      - name: Build shared CPython for Linux packaging
+        if: inputs.target == 'linux-x64' && steps.python-cache.outputs.cache-hit != 'true'
+        run: |
+          bash packaging/scripts/build_python.sh \
+            build/python/source/Python-${{ env.PYTHON_SOURCE_VERSION }} \
+            build/python/source/libffi-3.4.8 \
+            "$TVIZ_PYTHON_PREFIX"
+
+      - name: Select shared CPython for Linux packaging
+        if: inputs.target == 'linux-x64'
+        run: |
+          echo "$TVIZ_PYTHON_PREFIX/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$TVIZ_PYTHON_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
+      - name: Install build dependencies
+        if: inputs.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          & $env:TVIZ_WINDOWS_PYTHON -m pip install --disable-pip-version-check --only-binary=:all: --require-hashes -r requirements-release.txt
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Clean shared Linux target packages
+        if: inputs.target == 'linux-x64'
+        run: |
+          site_packages="$TVIZ_PYTHON_PREFIX/lib/python3.12/site-packages"
+          rm -rf -- "$site_packages"
+          mkdir -p -- "$site_packages"
+
+      - name: Install build dependencies into shared Linux Python
+        if: inputs.target == 'linux-x64'
+        run: >-
+          /opt/python/cp312-cp312/bin/python -m pip install
+          --disable-pip-version-check
+          --only-binary=:all:
+          --require-hashes
+          --target "$TVIZ_PYTHON_PREFIX/lib/python3.12/site-packages"
+          -r requirements-release.txt
+
+      - name: Verify shared Linux Python runtime
+        if: inputs.target == 'linux-x64'
+        run: >-
+          python -c "import platform, sysconfig;
+          expected='3.12.13'; actual=platform.python_version();
+          assert actual == expected, f'Expected Python {expected}, found {actual}';
+          assert sysconfig.get_config_var('Py_ENABLE_SHARED') == 1,
+          'Linux release Python must provide libpython';
+          import ctypes"
+
+      - name: Restore unsigned FFmpeg build
+        id: ffmpeg-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            build/ffmpeg/${{ inputs.target }}/prefix
+          key: ffmpeg-${{ env.FFMPEG_VERSION }}-${{ env.FFMPEG_SOURCE_SHA256 }}-${{ env.FFMPEG_BUILD_CONFIG }}-${{ inputs.target }}-${{ env.TVIZ_TOOLCHAIN_REVISION }}-${{ hashFiles('packaging/scripts/build_ffmpeg.sh') }}
+
+      - name: Build FFmpeg natively
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true' && inputs.target == 'linux-x64'
+        run: >-
+          bash packaging/scripts/build_ffmpeg.sh
+          build/ffmpeg/source/ffmpeg-9.0.1
+          build/ffmpeg/${{ inputs.target }}/prefix
+
+      - name: Build FFmpeg natively on Windows
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true' && inputs.target == 'windows-x64'
+        shell: msys2 {0}
+        run: >-
+          bash packaging/scripts/build_ffmpeg.sh
+          build/ffmpeg/source/ffmpeg-9.0.1
+          build/ffmpeg/${{ inputs.target }}/prefix
+
+      - name: Verify cached or freshly built FFmpeg
+        if: inputs.target == 'linux-x64'
+        run: >-
+          bash packaging/scripts/build_ffmpeg.sh
+          --verify-prefix
+          build/ffmpeg/${{ inputs.target }}/prefix
+
+      - name: Verify cached or freshly built FFmpeg on Windows
+        if: inputs.target == 'windows-x64'
+        shell: msys2 {0}
+        run: >-
+          bash packaging/scripts/build_ffmpeg.sh
+          --verify-prefix
+          build/ffmpeg/${{ inputs.target }}/prefix
+
+      - name: Build native release
+        if: inputs.target == 'linux-x64'
+        run: |
+          python scripts/build_release.py \
+            --release-dir "$TVIZ_RELEASE_DIR" \
+            --ffmpeg "$TVIZ_FFMPEG" \
+            --ffprobe "$TVIZ_FFPROBE" \
+            --ffmpeg-license "$TVIZ_FFMPEG_LICENSE" \
+            --ffmpeg-version "$TVIZ_FFMPEG_VERSION" \
+            --ffmpeg-source-url "$TVIZ_FFMPEG_SOURCE_URL" \
+            --ffmpeg-source-sha256 "$TVIZ_FFMPEG_SOURCE_SHA256" \
+            --runtime-baseline "$TVIZ_RUNTIME_BASELINE"
+
+      - name: Build native release on Windows
+        if: inputs.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          & $env:TVIZ_WINDOWS_PYTHON scripts/build_release.py `
+            --release-dir "$env:TVIZ_RELEASE_DIR" `
+            --ffmpeg "$env:TVIZ_FFMPEG" `
+            --ffprobe "$env:TVIZ_FFPROBE" `
+            --ffmpeg-license "$env:TVIZ_FFMPEG_LICENSE" `
+            --ffmpeg-version "$env:TVIZ_FFMPEG_VERSION" `
+            --ffmpeg-source-url "$env:TVIZ_FFMPEG_SOURCE_URL" `
+            --ffmpeg-source-sha256 "$env:TVIZ_FFMPEG_SOURCE_SHA256" `
+            --windows-libffi-license "$env:GITHUB_WORKSPACE/build/python/source/cpython-source-deps-libffi-3.4.4/LICENSE" `
+            --windows-openssl-license "$env:GITHUB_WORKSPACE/build/python/source/cpython-source-deps-openssl-3.0.16/LICENSE.txt" `
+            --runtime-baseline "$env:TVIZ_RUNTIME_BASELINE"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Generate SPDX SBOM on Linux
+        if: inputs.target == 'linux-x64'
+        run: >-
+          /opt/python/cp312-cp312/bin/python scripts/generate_release_sbom.py
+          --archive "${{ runner.temp }}/${{ env.TVIZ_SYFT_ARCHIVE }}"
+          --url "${{ env.SYFT_RELEASE_BASE_URL }}/${{ env.TVIZ_SYFT_ARCHIVE }}"
+          --sha256 "${{ env.TVIZ_SYFT_SHA256 }}"
+          --checksums "${{ runner.temp }}/syft_1.42.3_checksums.txt"
+          --checksums-url "${{ env.SYFT_CHECKSUMS_URL }}"
+          --checksums-sha256 "${{ env.SYFT_CHECKSUMS_SHA256 }}"
+          --member "${{ env.TVIZ_SYFT_MEMBER }}"
+          --version "${{ env.SYFT_VERSION }}"
+          --scan "${{ env.TVIZ_RELEASE_DIR }}"
+          --output "${{ env.TVIZ_RELEASE_DIR }}/resolve-track-visualizer-${{ needs.prepare.outputs.version }}-${{ inputs.target }}.spdx.json"
+          --download
+
+      - name: Generate SPDX SBOM on Windows
+        if: inputs.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          & $env:TVIZ_WINDOWS_PYTHON scripts/generate_release_sbom.py `
+            --archive "${{ runner.temp }}/${{ env.TVIZ_SYFT_ARCHIVE }}" `
+            --url "${{ env.SYFT_RELEASE_BASE_URL }}/${{ env.TVIZ_SYFT_ARCHIVE }}" `
+            --sha256 "${{ env.TVIZ_SYFT_SHA256 }}" `
+            --checksums "${{ runner.temp }}/syft_1.42.3_checksums.txt" `
+            --checksums-url "${{ env.SYFT_CHECKSUMS_URL }}" `
+            --checksums-sha256 "${{ env.SYFT_CHECKSUMS_SHA256 }}" `
+            --member "${{ env.TVIZ_SYFT_MEMBER }}" `
+            --version "${{ env.SYFT_VERSION }}" `
+            --scan "$env:TVIZ_RELEASE_DIR" `
+            --output "$env:TVIZ_RELEASE_DIR/resolve-track-visualizer-${{ needs.prepare.outputs.version }}-${{ inputs.target }}.spdx.json" `
+            --download
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Validate exact release artifact set on Linux
+        if: inputs.target == 'linux-x64'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          version = os.environ["TVIZ_VERSION"]
+          target = os.environ["TVIZ_TARGET"]
+          output = Path(os.environ["TVIZ_RELEASE_DIR"])
+          portable_suffix = ".zip" if target == "windows-x64" else ".tar.gz"
+          setup_suffix = ".exe" if target == "windows-x64" else ""
+          expected = {
+              f"DavinciTrackVisualizer-{version}-{target}{portable_suffix}",
+              f"TrackVisualizerSetup-{version}-{target}{setup_suffix}",
+              f"resolve-track-visualizer-{version}-{target}.spdx.json",
+          }
+          if target != "windows-x64":
+              expected.add(f"TrackVisualizerSetup-{version}-{target}.tar.gz")
+          entries = list(output.iterdir()) if output.is_dir() else []
+          actual = {path.name for path in entries if path.is_file() and not path.is_symlink()}
+          invalid = sorted(path.name for path in entries if not path.is_file() or path.is_symlink())
+          if invalid or actual != expected:
+              raise SystemExit(
+                  f"Release artifact set mismatch: expected={sorted(expected)}, "
+                  f"actual={sorted(actual)}, invalid={invalid}"
+              )
+          checksums = []
+          for name in sorted(actual):
+              digest = hashlib.sha256()
+              with (output / name).open("rb") as handle:
+                  while chunk := handle.read(1024 * 1024):
+                      digest.update(chunk)
+              checksums.append(f"{digest.hexdigest()}  {name}")
+          manifest = output / "INTERNAL_SHA256SUMS"
+          manifest.write_text("\n".join(checksums) + "\n", encoding="ascii")
+          print("\n".join(str(output / name) for name in sorted(actual | {manifest.name})))
+          PY
+
+      - name: Validate exact release artifact set on Windows
+        if: inputs.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          @'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          version = os.environ["TVIZ_VERSION"]
+          target = os.environ["TVIZ_TARGET"]
+          output = Path(os.environ["TVIZ_RELEASE_DIR"])
+          portable_suffix = ".zip" if target == "windows-x64" else ".tar.gz"
+          setup_suffix = ".exe" if target == "windows-x64" else ""
+          expected = {
+              f"DavinciTrackVisualizer-{version}-{target}{portable_suffix}",
+              f"TrackVisualizerSetup-{version}-{target}{setup_suffix}",
+              f"resolve-track-visualizer-{version}-{target}.spdx.json",
+          }
+          if target != "windows-x64":
+              expected.add(f"TrackVisualizerSetup-{version}-{target}.tar.gz")
+          entries = list(output.iterdir()) if output.is_dir() else []
+          actual = {path.name for path in entries if path.is_file() and not path.is_symlink()}
+          invalid = sorted(path.name for path in entries if not path.is_file() or path.is_symlink())
+          if invalid or actual != expected:
+              raise SystemExit(
+                  f"Release artifact set mismatch: expected={sorted(expected)}, "
+                  f"actual={sorted(actual)}, invalid={invalid}"
+              )
+          checksums = []
+          for name in sorted(actual):
+              digest = hashlib.sha256()
+              with (output / name).open("rb") as handle:
+                  while chunk := handle.read(1024 * 1024):
+                      digest.update(chunk)
+              checksums.append(f"{digest.hexdigest()}  {name}")
+          manifest = output / "INTERNAL_SHA256SUMS"
+          manifest.write_text("\n".join(checksums) + "\n", encoding="ascii")
+          print("\n".join(str(output / name) for name in sorted(actual | {manifest.name})))
+          '@ | & $env:TVIZ_WINDOWS_PYTHON -
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Re-query live repository visibility before Windows target upload
+        if: inputs.target == 'windows-x64'
+        env:
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          @'
+          import json
+          import os
+          import urllib.request
+
+          request = urllib.request.Request(
+              f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{os.environ['GITHUB_REPOSITORY']}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              repository = json.load(response)
+          if repository.get("visibility") != "private":
+              raise SystemExit(
+                  f"Refusing unsigned artifact upload: live visibility is {repository.get('visibility')!r}"
+              )
+          print("Live repository visibility is private")
+          '@ | & $env:TVIZ_WINDOWS_PYTHON -
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Upload internal Windows target transfer artifact
+        if: inputs.target == 'windows-x64'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: internal-native-transfer-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
+          path: ${{ env.TVIZ_RELEASE_DIR }}/*
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: true
+
+      - name: Re-query live repository visibility before Linux target upload
+        if: inputs.target == 'linux-x64'
+        env:
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          /opt/python/cp312-cp312/bin/python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          request = urllib.request.Request(
+              f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{os.environ['GITHUB_REPOSITORY']}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              repository = json.load(response)
+          if repository.get("visibility") != "private":
+              raise SystemExit(
+                  f"Refusing unsigned artifact upload: live visibility is {repository.get('visibility')!r}"
+              )
+          print("Live repository visibility is private")
+          PY
+
+      - name: Upload internal Linux target transfer artifact
+        if: inputs.target == 'linux-x64'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: internal-native-transfer-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
+          path: ${{ env.TVIZ_RELEASE_DIR }}/*
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: true
+
+  assemble:
+    name: Checksums and release bundle
+    needs:
+      - prepare
+      - build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+
+      - name: Verify exact Python runtime
+        run: python -c "import platform; expected='3.12.13'; actual=platform.python_version(); assert actual == expected, f'Expected Python {expected}, found {actual}'"
+
+      - name: Download internal target transfer artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: internal-native-transfer-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
+          path: internal-target
+
+      - name: Download dependency corresponding sources
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: internal-native-sources-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
+          path: release-bundle/source
+
+      - name: Verify internal dependency source transfer checksums
+        run: |
+          python - <<'PY'
+          import hashlib
+          import re
+          from pathlib import Path, PurePosixPath
+
+          source_root = Path("release-bundle/source")
+          manifest = source_root / "INTERNAL_SHA256SUMS"
+          if manifest.is_symlink() or not manifest.is_file():
+              raise SystemExit(f"Internal source checksum manifest is missing: {manifest}")
+
+          records = {}
+          for line in manifest.read_text(encoding="ascii").splitlines():
+              match = re.fullmatch(r"([0-9a-f]{64})  (.+)", line)
+              if match is None:
+                  raise SystemExit(f"Invalid internal source checksum record: {line!r}")
+              digest, name = match.groups()
+              relative = PurePosixPath(name)
+              if (
+                  relative.is_absolute()
+                  or len(relative.parts) != 1
+                  or relative.name == manifest.name
+                  or name in records
+              ):
+                  raise SystemExit(f"Unsafe internal source checksum path: {name!r}")
+              records[name] = digest
+          if not records:
+              raise SystemExit("Internal source checksum manifest is empty")
+
+          entries = list(source_root.iterdir()) if source_root.is_dir() else []
+          invalid = sorted(
+              path.name for path in entries if path.is_symlink() or not path.is_file()
+          )
+          actual = {path.name for path in entries if path.name != manifest.name}
+          if invalid or actual != set(records):
+              raise SystemExit(
+                  f"Internal source transfer set mismatch: expected={sorted(records)}, "
+                  f"actual={sorted(actual)}, invalid={invalid}"
+              )
+
+          for name, expected_digest in sorted(records.items()):
+              digest = hashlib.sha256()
+              with (source_root / name).open("rb") as handle:
+                  while chunk := handle.read(1024 * 1024):
+                      digest.update(chunk)
+              actual_digest = digest.hexdigest()
+              if actual_digest != expected_digest:
+                  raise SystemExit(
+                      f"Internal source checksum mismatch for {name}: "
+                      f"expected {expected_digest}, found {actual_digest}"
+                  )
+          print("Verified internal dependency source transfer")
+          PY
+
+      - name: Verify internal transfer checksums and assemble target artifacts
+        run: |
+          python - <<'PY'
+          import hashlib
+          import re
+          import shutil
+          from pathlib import Path, PurePosixPath
+
+          transfer = Path("internal-target")
+          manifest = transfer / "INTERNAL_SHA256SUMS"
+          if manifest.is_symlink() or not manifest.is_file():
+              raise SystemExit(f"Internal transfer checksum manifest is missing: {manifest}")
+
+          records = {}
+          for line in manifest.read_text(encoding="ascii").splitlines():
+              match = re.fullmatch(r"([0-9a-f]{64})  (.+)", line)
+              if match is None:
+                  raise SystemExit(f"Invalid internal checksum record: {line!r}")
+              digest, name = match.groups()
+              relative = PurePosixPath(name)
+              if (
+                  relative.is_absolute()
+                  or len(relative.parts) != 1
+                  or relative.name == manifest.name
+                  or name in records
+              ):
+                  raise SystemExit(f"Unsafe internal checksum path: {name!r}")
+              records[name] = digest
+          if not records:
+              raise SystemExit("Internal transfer checksum manifest is empty")
+
+          entries = list(transfer.iterdir()) if transfer.is_dir() else []
+          invalid = sorted(
+              path.name for path in entries if path.is_symlink() or not path.is_file()
+          )
+          actual = {path.name for path in entries if path.name != manifest.name}
+          if invalid or actual != set(records):
+              raise SystemExit(
+                  f"Internal transfer set mismatch: expected={sorted(records)}, "
+                  f"actual={sorted(actual)}, invalid={invalid}"
+              )
+
+          destination = Path("release-bundle/artifacts")
+          destination.mkdir(parents=True)
+          for name, expected_digest in sorted(records.items()):
+              source = transfer / name
+              digest = hashlib.sha256()
+              with source.open("rb") as handle:
+                  while chunk := handle.read(1024 * 1024):
+                      digest.update(chunk)
+              actual_digest = digest.hexdigest()
+              if actual_digest != expected_digest:
+                  raise SystemExit(
+                      f"Internal transfer checksum mismatch for {name}: "
+                      f"expected {expected_digest}, found {actual_digest}"
+                  )
+              shutil.copyfile(source, destination / name)
+          print("Verified and assembled internal target transfer")
+          PY
+
+      - name: Generate final bundle SHA-256 checksums
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          bundle = Path("release-bundle")
+          artifacts = bundle / "artifacts"
+          sources = bundle / "source"
+          for directory in (artifacts, sources):
+              if directory.is_symlink() or not directory.is_dir():
+                  raise SystemExit(f"Final bundle directory is missing: {directory}")
+              if not any(directory.iterdir()):
+                  raise SystemExit(f"Final bundle directory is empty: {directory}")
+
+          manifest = bundle / "SHA256SUMS"
+          if manifest.exists() or manifest.is_symlink():
+              raise SystemExit(f"Refusing to replace existing final checksum manifest: {manifest}")
+          entries = list(bundle.rglob("*"))
+          invalid = sorted(
+              path.relative_to(bundle).as_posix()
+              for path in entries
+              if path.is_symlink() or not (path.is_file() or path.is_dir())
+          )
+          if invalid:
+              raise SystemExit(f"Invalid final bundle entries: {invalid}")
+          files = sorted(
+              (path for path in entries if path.is_file()),
+              key=lambda path: path.relative_to(bundle).as_posix(),
+          )
+          lines = []
+          for path in files:
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  while chunk := handle.read(1024 * 1024):
+                      digest.update(chunk)
+              relative = path.relative_to(bundle).as_posix()
+              lines.append(f"{digest.hexdigest()}  {relative}")
+          manifest.write_text("\n".join(lines) + "\n", encoding="ascii")
+          print("\n".join(lines))
+          PY
+
+      - name: Verify final bundle SHA-256 checksums
+        working-directory: release-bundle
+        run: sha256sum -c SHA256SUMS
+
+      - name: Re-query live repository visibility before assembled bundle upload
+        env:
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          request = urllib.request.Request(
+              f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{os.environ['GITHUB_REPOSITORY']}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              repository = json.load(response)
+          if repository.get("visibility") != "private":
+              raise SystemExit(
+                  f"Refusing unsigned artifact upload: live visibility is {repository.get('visibility')!r}"
+              )
+          print("Live repository visibility is private")
+          PY
+
+      - name: Upload assembled release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: resolve-track-visualizer-${{ needs.prepare.outputs.version }}-${{ inputs.channel }}-${{ inputs.target }}
+          path: release-bundle
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Delete internal transfer artifacts
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INTERNAL_SOURCE_ARTIFACT: internal-native-sources-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
+          INTERNAL_TARGET_ARTIFACT: internal-native-transfer-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
+        run: |
+          artifact_ids=$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.name == env.INTERNAL_SOURCE_ARTIFACT or .name == env.INTERNAL_TARGET_ARTIFACT) | .id")
+          while read -r artifact_id; do
+            if [[ -n "$artifact_id" ]]; then
+              gh api --method DELETE \
+                "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id" \
+                --silent
+            fi
+          done <<< "$artifact_ids"

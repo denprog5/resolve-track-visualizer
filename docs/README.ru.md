@@ -6,11 +6,15 @@ Resolve Track Visualizer создает карточки музыкальных 
 
 ## Статус
 
-Версия `0.1.0` является preview-версией. Она проверена только с **DaVinci Resolve Studio 20.2.1 на Windows x64**. Работа в Resolve Free, Resolve 19 и старше, Resolve 21, а также внутри Resolve на macOS/Linux пока не сертифицирована. См. [матрицу совместимости](compatibility.md).
+Версия `0.1.0` является preview-версией. Она проверена только с **DaVinci Resolve Studio 20.2.1 на Windows x64**. Текущий интерфейс UIManager требует Resolve Studio, поэтому Resolve Free не поддерживается. Проверка Resolve 21 отложена; Resolve 19 и старше, Resolve 21 и Resolve на Linux не сертифицированы. См. [матрицу совместимости](compatibility.md).
 
-Native packaging содержит цели Windows x64, Linux x64, macOS arm64 и macOS Intel. Наличие build target не означает, что работа плагина проверена внутри Resolve на каждой платформе. Точные ограничения описаны в [release process](releasing.md).
+Windows x64 является единственной целью release candidate. Linux x64 собирается только отдельным ручным unpublished canary workflow. macOS не поддерживается, не собирается и не входит в текущий release scope. Наличие build target не означает, что работа плагина проверена внутри Resolve. Точные ограничения описаны в [release process](releasing.md).
 
-Preview-артефакты **не подписаны и не notarized**. Перед запуском следует проверить файл по опубликованному `SHA256SUMS`.
+Preview-артефакты **не подписаны**. Непосредственно перед каждой загрузкой workflow повторно проверяет private visibility через GitHub API; срок хранения артефактов составляет один день. Workflow не создаёт GitHub Release. Перед изменением visibility нужно удалить все сохранённые native-артефакты и соответствующие workflow runs: завершённый workflow не может защитить уже сохранённые данные. Собранный private-артефакт распаковывается в `artifacts/`, `source/` и корневой `SHA256SUMS`. Перед запуском внутренней тестовой сборки из корня распакованного артефакта нужно проверить все относительные пути:
+
+```bash
+sha256sum -c SHA256SUMS
+```
 
 ## Язык
 
@@ -44,7 +48,15 @@ Workspace -> Scripts -> Utility -> Track Visualizer
 
 Если пункт меню не появился, проверьте путь к Lua-файлу и убедитесь, что Resolve был полностью закрыт перед повторным запуском.
 
-GitHub Actions также готовит unsigned preview-сборки для Linux x64, macOS arm64 и macOS Intel. macOS-сборки пока не notarized, Linux требует glibc 2.28 или новее. Packaging smoke проходит на каждой ОС, но интеграция с Resolve на этих системах еще требует ручной сертификации.
+Удаление выполняется тем же setup-файлом:
+
+```powershell
+.\TrackVisualizerSetup-0.1.0-windows-x64.exe --uninstall --no-pause
+```
+
+Удаляются только управляемые runtime-файлы и Resolve-скрипт. Настройки, логи, задания, временные и отрендеренные файлы сохраняются.
+
+Отдельный ручной workflow готовит unpublished Linux x64 canary, требующий glibc 2.28 или новее. Packaging smoke проходит на Windows и Linux, но интеграция с Resolve проверена только на Windows x64.
 
 ## Работа В Resolve
 
@@ -104,11 +116,7 @@ python -m venv .venv
 .\.venv\Scripts\python scripts\install_resolve_script.py
 ```
 
-Native release build требует совместимую пару `ffmpeg` и `ffprobe` в `PATH`:
-
-```powershell
-.\.venv\Scripts\python scripts\build_release.py
-```
+Поддерживаемый воспроизводимый путь release-сборки — запускаемый вручную GitHub Actions workflow в private-репозитории. Прямой запуск `scripts/build_release.py` является расширенным эквивалентом: он требует строго Python 3.12.10 на Windows или 3.12.13 на Linux, проверенную парную сборку FFmpeg/FFprobe и явные значения `--ffmpeg-license`, `--ffmpeg-version`, `--ffmpeg-source-url` и `--ffmpeg-source-sha256`. Одного наличия FFmpeg в `PATH` недостаточно. На Windows также нужно передать проверенные файлы через `--windows-libffi-license` и `--windows-openssl-license`; скрипт дополнительно проверяет изоляцию Python user site.
 
 Лицензия проекта: [GNU GPL версии 3 или новее](../LICENSE), SPDX `GPL-3.0-or-later`.
 

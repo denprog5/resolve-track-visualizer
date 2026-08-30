@@ -11,6 +11,7 @@ import platform
 import re
 import shlex
 import shutil
+import site
 import stat
 import struct
 import subprocess
@@ -20,7 +21,7 @@ import tempfile
 import wave
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from collections.abc import Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,11 +34,17 @@ from davinci_track_visualizer import __version__
 PRODUCT_NAME = "DavinciTrackVisualizer"
 DEFAULT_SOURCE_DATE_EPOCH = 1_704_067_200
 EXECUTABLE_ROLES = ("engine", "runner", "ffmpeg", "ffprobe")
+WINDOWS_PRODUCT_NAME = "DaVinci Track Visualizer"
+WINDOWS_COMPANY_NAME = "denprog5"
+WINDOWS_LEGAL_COPYRIGHT = "Copyright (C) 2026 denprog5"
+WINDOWS_EXECUTABLE_DESCRIPTIONS = {
+    "TrackVisualizerEngine": "DaVinci Track Visualizer rendering engine",
+    "TrackVisualizerRunner": "DaVinci Track Visualizer background task runner",
+    "TrackVisualizerSetup": "DaVinci Track Visualizer setup",
+}
 RELEASE_PYTHON_VERSIONS = {
     "windows-x64": "3.12.10",
     "linux-x64": "3.12.13",
-    "macos-arm64": "3.12.10",
-    "macos-x64": "3.12.10",
 }
 RELEASE_PYTHON_SERIES = "3.12"
 MUTAGEN_VERSION = "1.47.0"
@@ -58,6 +65,10 @@ MUTAGEN_SOURCE_URL = (
 MUTAGEN_SOURCE_SHA256 = "719fadef0a978c31b4cf3c956261b3c58b6948b32023078a2117b1de09f0fc99"
 LIBFFI_VERSION = "3.4.8"
 LIBFFI_LICENSE_SHA256 = "67894089811f93fca47a76f85e017da6f8582d4ba0905963c6e0f1ad6df7a195"
+WINDOWS_LIBFFI_VERSION = "3.4.4"
+WINDOWS_LIBFFI_LICENSE_SHA256 = "2c9c2acb9743e6b007b91350475308aee44691d96aa20eacef8e199988c8c388"
+WINDOWS_OPENSSL_VERSION = "3.0.16"
+WINDOWS_OPENSSL_LICENSE_SHA256 = "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
 
 
 @dataclass(frozen=True)
@@ -92,7 +103,7 @@ class RuntimeFiles:
 
 def host_target() -> BuildTarget:
     system_value = platform.system().lower()
-    system_map = {"windows": "windows", "linux": "linux", "darwin": "macos"}
+    system_map = {"windows": "windows", "linux": "linux"}
     if system_value not in system_map:
         raise RuntimeError(f"Unsupported build host: {platform.system()}")
 
@@ -108,8 +119,6 @@ def host_target() -> BuildTarget:
     allowed = {
         ("windows", "x86_64"),
         ("linux", "x86_64"),
-        ("macos", "arm64"),
-        ("macos", "x86_64"),
     }
     if (target.system, target.architecture) not in allowed:
         raise RuntimeError(f"Unsupported native release target: {target.tag}")
@@ -123,6 +132,30 @@ def validate_python_runtime(target: BuildTarget) -> None:
     actual = platform.python_version()
     if actual != version:
         raise RuntimeError(f"Release builds require Python {version}, found {actual}")
+
+
+def validate_windows_user_site_isolation(
+    environ: Mapping[str, str] | None = None,
+    effective_path: tuple[str, ...] | None = None,
+    user_site: str | None = None,
+) -> None:
+    env = os.environ if environ is None else environ
+    if env.get("PYTHONNOUSERSITE") != "1":
+        raise RuntimeError("Windows release builds require PYTHONNOUSERSITE=1")
+    if site.ENABLE_USER_SITE is not False:
+        raise RuntimeError(f"Windows release Python user site is not disabled: {site.ENABLE_USER_SITE!r}")
+
+    configured_user_site = site.getusersitepackages() if user_site is None else user_site
+    if not isinstance(configured_user_site, str) or not configured_user_site:
+        raise RuntimeError(f"Windows release Python returned an invalid user site: {configured_user_site!r}")
+
+    def normalized(value: str) -> str:
+        return os.path.normcase(os.path.realpath(os.path.abspath(value)))
+
+    user_site_path = normalized(configured_user_site)
+    python_path = tuple(sys.path) if effective_path is None else effective_path
+    if user_site_path in {normalized(value) for value in python_path if value}:
+        raise RuntimeError(f"Windows release Python user site is present on sys.path: {user_site_path}")
 
 
 def source_date_epoch(value: int | None = None) -> int:
@@ -538,6 +571,41 @@ def libffi_license_file(prefix: Path | None = None) -> Path:
     return candidate
 
 
+def windows_runtime_license_files(
+    libffi_license: Path | None,
+    openssl_license: Path | None,
+) -> dict[str, Path]:
+    specifications = (
+        (
+            "libffi-LICENSE.txt",
+            libffi_license,
+            "libffi",
+            WINDOWS_LIBFFI_VERSION,
+            WINDOWS_LIBFFI_LICENSE_SHA256,
+        ),
+        (
+            "OpenSSL-LICENSE.txt",
+            openssl_license,
+            "OpenSSL",
+            WINDOWS_OPENSSL_VERSION,
+            WINDOWS_OPENSSL_LICENSE_SHA256,
+        ),
+    )
+    result: dict[str, Path] = {}
+    for staged_name, candidate, component, version, expected_digest in specifications:
+        if candidate is None:
+            raise RuntimeError(f"Windows release requires the {component} {version} license")
+        if not candidate.is_file():
+            raise FileNotFoundError(f"Windows {component} {version} license is missing: {candidate}")
+        digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        if digest != expected_digest:
+            raise RuntimeError(
+                f"Windows {component} {version} has an unrecognized license payload: {digest}"
+            )
+        result[staged_name] = candidate
+    return result
+
+
 def distribution_license_files() -> dict[str, Path]:
     result: dict[str, Path] = {}
     for distribution_name in ("mutagen", "PyInstaller"):
@@ -660,7 +728,7 @@ def stage_package(
     source_record += f"SHA-256: {ffmpeg_source_sha256 or 'not recorded'}\n"
     source_offer.write_text(
         source_record
-        + "The official release workflow publishes the byte-identical FFmpeg source archive beside the binary assets.\n"
+        + "The assembled private Actions artifact includes the byte-identical FFmpeg source archive under source/.\n"
         + "The complete build recipe is included as licenses/FFMPEG_BUILD_SCRIPT.sh and in the project source.\n"
         + "No patches or external libraries are used. FFmpeg libraries are linked statically; operating-system "
         + "runtime libraries remain platform dependencies.\n",
@@ -675,7 +743,7 @@ def stage_package(
         f"Version: {MUTAGEN_VERSION}\n"
         f"Official PyPI source URL: {MUTAGEN_SOURCE_URL}\n"
         f"SHA-256: {MUTAGEN_SOURCE_SHA256}\n"
-        "The official release workflow publishes this byte-identical source archive beside the binary assets.\n",
+        "The assembled private Actions artifact includes this byte-identical source archive under source/.\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -775,6 +843,208 @@ def create_archive(stage_dir: Path, artifact: Path, target: BuildTarget, epoch: 
         create_tar_archive(stage_dir, artifact, epoch)
 
 
+def windows_numeric_version(version: str) -> tuple[int, int, int, int]:
+    match = re.fullmatch(
+        r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?",
+        version,
+    )
+    if match is None:
+        raise ValueError(f"Unsupported project version for Windows metadata: {version!r}")
+    components = tuple(int(value) for value in match.groups())
+    if any(value > 65_535 for value in components):
+        raise ValueError(f"Windows version components must not exceed 65535: {version!r}")
+    return (*components, 0)
+
+
+def windows_version_metadata(version: str, executable_name: str) -> dict[str, str]:
+    try:
+        description = WINDOWS_EXECUTABLE_DESCRIPTIONS[executable_name]
+    except KeyError as error:
+        raise ValueError(f"Unknown first-party Windows executable: {executable_name}") from error
+    windows_numeric_version(version)
+    return {
+        "CompanyName": WINDOWS_COMPANY_NAME,
+        "FileDescription": description,
+        "FileVersion": version,
+        "InternalName": executable_name,
+        "LegalCopyright": WINDOWS_LEGAL_COPYRIGHT,
+        "OriginalFilename": f"{executable_name}.exe",
+        "ProductName": WINDOWS_PRODUCT_NAME,
+        "ProductVersion": version,
+    }
+
+
+def windows_version_resource(version: str, executable_name: str) -> str:
+    numeric_version = windows_numeric_version(version)
+    strings = windows_version_metadata(version, executable_name)
+    string_structs = "\n".join(
+        f"            StringStruct(u{key!r}, u{value!r})," for key, value in strings.items()
+    )
+    return (
+        "# UTF-8\n"
+        "VSVersionInfo(\n"
+        "  ffi=FixedFileInfo(\n"
+        f"    filevers={numeric_version!r},\n"
+        f"    prodvers={numeric_version!r},\n"
+        "    mask=0x3f,\n"
+        "    flags=0x0,\n"
+        "    OS=0x40004,\n"
+        "    fileType=0x1,\n"
+        "    subtype=0x0,\n"
+        "    date=(0, 0),\n"
+        "  ),\n"
+        "  kids=[\n"
+        "    StringFileInfo(\n"
+        "      [\n"
+        "        StringTable(\n"
+        "          u'040904B0',\n"
+        "          [\n"
+        f"{string_structs}\n"
+        "          ],\n"
+        "        ),\n"
+        "      ],\n"
+        "    ),\n"
+        "    VarFileInfo([VarStruct(u'Translation', [1033, 1200])]),\n"
+        "  ],\n"
+        ")\n"
+    )
+
+
+def write_windows_version_file(
+    path: Path,
+    version: str,
+    executable_name: str,
+    *,
+    epoch: int | None = None,
+) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        windows_version_resource(version, executable_name),
+        encoding="utf-8",
+        newline="\n",
+    )
+    if epoch is not None:
+        os.utime(path, (epoch, epoch))
+    return path
+
+
+def _read_windows_version_metadata(
+    path: Path,
+    fields: tuple[str, ...],
+) -> dict[str, str | tuple[int, int, int, int]]:
+    if os.name != "nt":
+        raise RuntimeError("Windows version resources can only be read on Windows")
+    if not path.is_file():
+        raise FileNotFoundError(path)
+
+    import ctypes
+    from ctypes import wintypes
+
+    version_dll = ctypes.WinDLL("version", use_last_error=True)
+    get_size = version_dll.GetFileVersionInfoSizeW
+    get_size.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+    get_size.restype = wintypes.DWORD
+    get_info = version_dll.GetFileVersionInfoW
+    get_info.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p]
+    get_info.restype = wintypes.BOOL
+    query_value = version_dll.VerQueryValueW
+    query_value.argtypes = [
+        ctypes.c_void_p,
+        wintypes.LPCWSTR,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(wintypes.UINT),
+    ]
+    query_value.restype = wintypes.BOOL
+
+    class VS_FIXEDFILEINFO(ctypes.Structure):
+        _fields_ = [
+            ("dwSignature", wintypes.DWORD),
+            ("dwStrucVersion", wintypes.DWORD),
+            ("dwFileVersionMS", wintypes.DWORD),
+            ("dwFileVersionLS", wintypes.DWORD),
+            ("dwProductVersionMS", wintypes.DWORD),
+            ("dwProductVersionLS", wintypes.DWORD),
+            ("dwFileFlagsMask", wintypes.DWORD),
+            ("dwFileFlags", wintypes.DWORD),
+            ("dwFileOS", wintypes.DWORD),
+            ("dwFileType", wintypes.DWORD),
+            ("dwFileSubtype", wintypes.DWORD),
+            ("dwFileDateMS", wintypes.DWORD),
+            ("dwFileDateLS", wintypes.DWORD),
+        ]
+
+    ignored_handle = wintypes.DWORD()
+    size = get_size(str(path), ctypes.byref(ignored_handle))
+    if size == 0:
+        raise RuntimeError(f"Windows version resource is missing or unreadable: {path}") from ctypes.WinError(
+            ctypes.get_last_error()
+        )
+    buffer = ctypes.create_string_buffer(size)
+    if not get_info(str(path), 0, size, buffer):
+        raise RuntimeError(f"Could not read Windows version resource: {path}") from ctypes.WinError(
+            ctypes.get_last_error()
+        )
+
+    value_pointer = ctypes.c_void_p()
+    value_length = wintypes.UINT()
+    if not query_value(buffer, "\\", ctypes.byref(value_pointer), ctypes.byref(value_length)):
+        raise RuntimeError(f"Windows version resource has no VS_FIXEDFILEINFO: {path}")
+    if not value_pointer.value or value_length.value < ctypes.sizeof(VS_FIXEDFILEINFO):
+        raise RuntimeError(f"Windows version resource has invalid VS_FIXEDFILEINFO: {path}")
+    fixed_info = ctypes.cast(value_pointer, ctypes.POINTER(VS_FIXEDFILEINFO)).contents
+    if fixed_info.dwSignature != 0xFEEF04BD:
+        raise RuntimeError(f"Windows version resource has invalid VS_FIXEDFILEINFO signature: {path}")
+
+    def numeric_version(ms: int, ls: int) -> tuple[int, int, int, int]:
+        return (ms >> 16, ms & 0xFFFF, ls >> 16, ls & 0xFFFF)
+
+    result: dict[str, str | tuple[int, int, int, int]] = {
+        "VS_FIXEDFILEINFO.FileVersion": numeric_version(
+            fixed_info.dwFileVersionMS, fixed_info.dwFileVersionLS
+        ),
+        "VS_FIXEDFILEINFO.ProductVersion": numeric_version(
+            fixed_info.dwProductVersionMS, fixed_info.dwProductVersionLS
+        ),
+    }
+    if not query_value(buffer, r"\VarFileInfo\Translation", ctypes.byref(value_pointer), ctypes.byref(value_length)):
+        raise RuntimeError(f"Windows version resource has no translation table: {path}")
+    translation_data = ctypes.string_at(value_pointer.value, value_length.value)
+    translations = [
+        struct.unpack_from("<HH", translation_data, offset)
+        for offset in range(0, len(translation_data) - 3, 4)
+    ]
+    if not translations:
+        raise RuntimeError(f"Windows version resource has an empty translation table: {path}")
+
+    for field in fields:
+        for language, code_page in translations:
+            query = rf"\StringFileInfo\{language:04X}{code_page:04X}\{field}"
+            if query_value(buffer, query, ctypes.byref(value_pointer), ctypes.byref(value_length)):
+                result[field] = ctypes.wstring_at(value_pointer.value, value_length.value).rstrip("\0")
+                break
+        else:
+            raise RuntimeError(f"Windows version resource is missing {field}: {path}")
+    return result
+
+
+def validate_windows_version_metadata(path: Path, version: str, executable_name: str) -> None:
+    expected_strings = windows_version_metadata(version, executable_name)
+    numeric_version = windows_numeric_version(version)
+    expected: dict[str, str | tuple[int, int, int, int]] = {
+        **expected_strings,
+        "VS_FIXEDFILEINFO.FileVersion": numeric_version,
+        "VS_FIXEDFILEINFO.ProductVersion": numeric_version,
+    }
+    actual = _read_windows_version_metadata(path, tuple(expected_strings))
+    mismatches = [
+        f"{field}: expected {expected_value!r}, found {actual.get(field)!r}"
+        for field, expected_value in expected.items()
+        if actual.get(field) != expected_value
+    ]
+    if mismatches:
+        raise RuntimeError(f"Unexpected Windows version metadata in {path}: {'; '.join(mismatches)}")
+
+
 def pyinstaller_command(
     entry_point: Path,
     name: str,
@@ -782,6 +1052,8 @@ def pyinstaller_command(
     work_dir: Path,
     spec_dir: Path,
     *,
+    target: BuildTarget,
+    version_file: Path | None = None,
     windowed: bool = False,
     additions: list[tuple[Path, str, str]] | None = None,
 ) -> list[str]:
@@ -805,6 +1077,12 @@ def pyinstaller_command(
         "--paths",
         str(ROOT),
     ]
+    if target.system == "windows":
+        if version_file is None:
+            raise ValueError(f"A Windows version file is required for {name}")
+        command.extend(["--version-file", str(version_file)])
+    elif version_file is not None:
+        raise ValueError(f"A Windows version file cannot be used for {target.tag}")
     if windowed:
         command.append("--windowed")
     for source, destination, kind in additions or []:
@@ -824,6 +1102,76 @@ def apply_signing_hook(path: Path, command_template: str | None) -> None:
     if all("{path}" not in part for part in parts):
         replaced.append(str(path))
     run(replaced)
+
+
+def _trusted_stage_manifest_paths(stage_dir: Path) -> tuple[PurePosixPath, ...]:
+    manifest_path = stage_dir / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as error:
+        raise RuntimeError(f"Could not read trusted stage manifest: {manifest_path}") from error
+    if not isinstance(manifest, dict) or manifest.get("schema") != "davinci-track-visualizer.release.v1":
+        raise RuntimeError(f"Unexpected trusted stage manifest schema: {manifest_path}")
+    if manifest.get("product") != PRODUCT_NAME or not isinstance(manifest.get("files"), list):
+        raise RuntimeError(f"Invalid trusted stage manifest: {manifest_path}")
+
+    paths: list[PurePosixPath] = []
+    seen: set[str] = set()
+    for record in manifest["files"]:
+        packaged_path = record.get("path") if isinstance(record, dict) else None
+        relative = PurePosixPath(packaged_path) if isinstance(packaged_path, str) else None
+        if (
+            relative is None
+            or not packaged_path
+            or "\\" in packaged_path
+            or relative.is_absolute()
+            or relative.as_posix() != packaged_path
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or packaged_path in seen
+        ):
+            raise RuntimeError(f"Invalid path in trusted stage manifest: {packaged_path!r}")
+        staged_path = stage_dir.joinpath(*relative.parts)
+        if staged_path.is_symlink() or not staged_path.is_file():
+            raise RuntimeError(f"Trusted stage manifest file is missing: {staged_path}")
+        if record != _file_record(staged_path, stage_dir):
+            raise RuntimeError(f"Trusted stage manifest record does not match {staged_path}")
+        seen.add(packaged_path)
+        paths.append(relative)
+    return tuple(paths)
+
+
+def _installer_smoke_required_files(
+    runtime: RuntimeFiles,
+    stage_dir: Path,
+    install_root: Path,
+    script_dir: Path,
+) -> tuple[Path, ...]:
+    packaged_paths = set(_trusted_stage_manifest_paths(stage_dir))
+    installed_files = {
+        PurePosixPath("bin", runtime.engine.name): install_root / runtime.engine.name,
+        PurePosixPath("bin", runtime.runner.name): install_root / runtime.runner.name,
+        PurePosixPath("bin", runtime.ffmpeg.name): install_root / runtime.ffmpeg.name,
+        PurePosixPath("bin", runtime.ffprobe.name): install_root / runtime.ffprobe.name,
+        PurePosixPath("resources", "aplus.png"): install_root / "aplus.png",
+        PurePosixPath("resources", "Track Visualizer.lua"): script_dir / "Track Visualizer.lua",
+        PurePosixPath("THIRD_PARTY_NOTICES.txt"): install_root / "THIRD_PARTY_NOTICES.txt",
+        PurePosixPath("LICENSE"): install_root / "LICENSE",
+    }
+    missing_sources = sorted(
+        (path.as_posix() for path in installed_files if path not in packaged_paths)
+    )
+    if missing_sources:
+        raise RuntimeError(f"Trusted stage manifest is missing installer files: {missing_sources}")
+
+    required = set(installed_files.values())
+    required.add(install_root / "manifest.json")
+    required.add(install_root / "install-state.json")
+    required.update(
+        install_root.joinpath(*path.parts)
+        for path in packaged_paths
+        if path.parts[0] == "licenses"
+    )
+    return tuple(sorted(required, key=str))
 
 
 def smoke_test(runtime: RuntimeFiles, setup: Path | None, stage_dir: Path) -> None:
@@ -856,12 +1204,99 @@ def smoke_test(runtime: RuntimeFiles, setup: Path | None, stage_dir: Path) -> No
     if result.get("returncode") != 0:
         raise RuntimeError(f"Runner queue smoke test failed: {result}")
     if setup is not None:
-        subprocess.run(
-            [str(setup), "--dry-run", "--no-pause"],
-            cwd=stage_dir,
-            check=True,
-            timeout=60,
-        )
+        with tempfile.TemporaryDirectory(prefix="tviz-install-smoke-") as temporary_dir:
+            temporary_root = Path(temporary_dir)
+            install_root = temporary_root / "application"
+            script_dir = temporary_root / "resolve-scripts"
+            common_arguments = [
+                "--language",
+                "en",
+                "--install-root",
+                str(install_root),
+                "--resolve-script-dir",
+                str(script_dir),
+                "--no-pause",
+            ]
+            subprocess.run(
+                [str(setup), "--dry-run", *common_arguments],
+                cwd=stage_dir,
+                check=True,
+                timeout=60,
+            )
+            subprocess.run(
+                [str(setup), *common_arguments],
+                cwd=stage_dir,
+                check=True,
+                timeout=60,
+            )
+
+            installed_runtime = install_root / runtime.engine.name
+            installed_script = script_dir / "Track Visualizer.lua"
+            required = _installer_smoke_required_files(
+                runtime, stage_dir, install_root, script_dir
+            )
+            missing = [str(path) for path in required if not path.is_file()]
+            if missing:
+                raise RuntimeError(f"Installer lifecycle smoke test is missing files: {missing}")
+            script_text = installed_script.read_text(encoding="utf-8")
+            script_replacements = {
+                "__INSTALL_ROOT__": str(install_root),
+                "__ENGINE_EXECUTABLE__": str(install_root / runtime.engine.name),
+                "__RUNNER_EXECUTABLE__": str(install_root / runtime.runner.name),
+                "__FFMPEG_EXECUTABLE__": str(install_root / runtime.ffmpeg.name),
+                "__FFPROBE_EXECUTABLE__": str(install_root / runtime.ffprobe.name),
+            }
+            invalid_replacements = [
+                marker
+                for marker, replacement in script_replacements.items()
+                if marker in script_text or replacement not in script_text
+            ]
+            if invalid_replacements:
+                raise RuntimeError(
+                    f"Installed Resolve script has invalid marker replacements: {invalid_replacements}"
+                )
+            subprocess.run(
+                [str(installed_runtime), "--help"],
+                cwd=install_root,
+                check=True,
+                timeout=60,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
+            )
+
+            preserved_user_data = {
+                install_root / "settings.json": '{"smoke_test": true}\n',
+                install_root / "outputs" / "smoke.mp4": "rendered output\n",
+                install_root / "tasks" / "pending.json": "queued task\n",
+                install_root / "tmp" / "working.txt": "temporary user data\n",
+                install_root / "logs" / "engine.log": "user log\n",
+                install_root / "custom.dat": "unknown user file\n",
+                install_root / "licenses" / "custom" / "USER.txt": "user notice\n",
+                script_dir / "Another Utility.lua": "other Resolve script\n",
+            }
+            for path, content in preserved_user_data.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            subprocess.run(
+                [str(setup), "--uninstall", *common_arguments],
+                cwd=stage_dir,
+                check=True,
+                timeout=60,
+            )
+            remaining_managed = [str(path) for path in required if path.exists()]
+            if remaining_managed:
+                raise RuntimeError(
+                    f"Uninstall lifecycle smoke test left managed files: {remaining_managed}"
+                )
+            changed_user_data = [
+                str(path)
+                for path, content in preserved_user_data.items()
+                if not path.is_file() or path.read_text(encoding="utf-8") != content
+            ]
+            if changed_user_data:
+                raise RuntimeError(
+                    f"Uninstall lifecycle smoke test did not preserve user data: {changed_user_data}"
+                )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -893,6 +1328,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Required upstream FFmpeg release version",
     )
     parser.add_argument(
+        "--windows-libffi-license",
+        type=Path,
+        help="LICENSE extracted from the pinned Windows CPython libffi source-deps archive",
+    )
+    parser.add_argument(
+        "--windows-openssl-license",
+        type=Path,
+        help="LICENSE.txt extracted from the pinned Windows CPython OpenSSL source-deps archive",
+    )
+    parser.add_argument(
         "--runtime-baseline",
         default=os.environ.get("TVIZ_RUNTIME_BASELINE"),
         help="Runtime ABI or operating-system baseline recorded in the manifest",
@@ -918,6 +1363,15 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     target = host_target()
     validate_python_runtime(target)
+    windows_dependency_licenses: dict[str, Path] = {}
+    if target.system == "windows":
+        validate_windows_user_site_isolation()
+        windows_dependency_licenses = windows_runtime_license_files(
+            args.windows_libffi_license,
+            args.windows_openssl_license,
+        )
+    elif args.windows_libffi_license is not None or args.windows_openssl_license is not None:
+        raise RuntimeError("Windows CPython dependency licenses cannot be used for a non-Windows target")
     validate_release_environment(target, __version__)
     release_dir = args.release_dir.resolve()
     require_empty_release_directory(release_dir)
@@ -953,6 +1407,17 @@ def main(argv: list[str] | None = None) -> int:
 
     build_env = os.environ.copy()
     build_env["SOURCE_DATE_EPOCH"] = str(epoch)
+    if target.system == "windows":
+        build_env["PYTHONNOUSERSITE"] = "1"
+    windows_version_files: dict[str, Path] = {}
+    if target.system == "windows":
+        for executable_name in WINDOWS_EXECUTABLE_DESCRIPTIONS:
+            windows_version_files[executable_name] = write_windows_version_file(
+                work_root / "version-info" / f"{executable_name}.txt",
+                __version__,
+                executable_name,
+                epoch=epoch,
+            )
     engine_name = target.executable_name("TrackVisualizerEngine")
     runner_name = target.executable_name("TrackVisualizerRunner")
     run(
@@ -962,6 +1427,8 @@ def main(argv: list[str] | None = None) -> int:
             dist_dir,
             pyinstaller_work / "engine",
             spec_dir,
+            target=target,
+            version_file=windows_version_files.get("TrackVisualizerEngine"),
         ),
         env=build_env,
     )
@@ -972,6 +1439,8 @@ def main(argv: list[str] | None = None) -> int:
             dist_dir,
             pyinstaller_work / "runner",
             spec_dir,
+            target=target,
+            version_file=windows_version_files.get("TrackVisualizerRunner"),
             windowed=target.system == "windows",
         ),
         env=build_env,
@@ -987,10 +1456,18 @@ def main(argv: list[str] | None = None) -> int:
         if not path.is_file():
             raise FileNotFoundError(path)
         validate_native_binary(path, target, role)
+        if target.system == "windows":
+            executable_name = {
+                "engine": "TrackVisualizerEngine",
+                "runner": "TrackVisualizerRunner",
+            }[role]
+            validate_windows_version_metadata(path, __version__, executable_name)
         apply_signing_hook(path, args.sign_command)
 
     stage_name = f"{PRODUCT_NAME}-{__version__}-{target.tag}"
     stage_dir = work_root / stage_name
+    dependency_licenses = distribution_license_files()
+    dependency_licenses.update(windows_dependency_licenses)
     stage_package(
         stage_dir,
         built_runtime,
@@ -1003,7 +1480,7 @@ def main(argv: list[str] | None = None) -> int:
         ffmpeg_source_url=args.ffmpeg_source_url,
         ffmpeg_source_sha256=args.ffmpeg_source_sha256,
         ffmpeg_build_script=ROOT / "packaging" / "scripts" / "build_ffmpeg.sh",
-        dependency_licenses=distribution_license_files(),
+        dependency_licenses=dependency_licenses,
         signing="external-hook" if args.sign_command else "unsigned",
         runtime_baseline=args.runtime_baseline,
     )
@@ -1035,6 +1512,8 @@ def main(argv: list[str] | None = None) -> int:
                 dist_dir,
                 pyinstaller_work / "installer",
                 spec_dir,
+                target=target,
+                version_file=windows_version_files.get("TrackVisualizerSetup"),
                 additions=additions,
             ),
             env=build_env,
@@ -1043,6 +1522,8 @@ def main(argv: list[str] | None = None) -> int:
         if not built_setup.is_file():
             raise FileNotFoundError(built_setup)
         validate_native_binary(built_setup, target, "installer")
+        if target.system == "windows":
+            validate_windows_version_metadata(built_setup, __version__, "TrackVisualizerSetup")
         setup_name = f"TrackVisualizerSetup-{__version__}-{target.tag}{target.executable_suffix}"
         setup_path = release_dir / setup_name
         shutil.copy2(built_setup, setup_path)

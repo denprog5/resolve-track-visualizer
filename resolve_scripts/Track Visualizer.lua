@@ -2224,8 +2224,25 @@ end
 
 local save_current_style
 
+local function windows_powershell_path()
+    if not PLATFORM.windows then return "" end
+    for _, variable in ipairs({ "SystemRoot", "WINDIR" }) do
+        local system_root = trim(environment_value(nil, variable))
+        if system_root ~= "" and is_absolute_path(system_root) then
+            local directory = path_join(path_join(system_root, "System32"), "WindowsPowerShell")
+            local candidate = path_join(path_join(directory, "v1.0"), "powershell.exe")
+            if file_exists(candidate) then return candidate end
+        end
+    end
+    return ""
+end
+
 local function pick_windows_color(field_id, fallback)
     if not PLATFORM.windows then error("Windows color picker called on a non-Windows platform") end
+    local powershell_path = windows_powershell_path()
+    if powershell_path == "" then
+        error("Windows PowerShell was not found under SystemRoot or WINDIR")
+    end
     local current = normalize_hex(text_field(field_id, fallback), fallback)
     local r, g, b = hex_to_rgb(current)
     local root = install_root()
@@ -2257,23 +2274,25 @@ local function pick_windows_color(field_id, fallback)
         "}",
         "$owner.Close()",
     }, "\r\n")
-    write_file(script_path, script)
-    run_runner_config({
-        mode = "run",
-        cwd = root,
-        command = {
-            "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-Sta", "-WindowStyle", "Hidden", "-File", script_path,
-            "-ResultPath", result_path,
-        },
-        stdout_path = stdout_path,
-        done_path = done_path,
-        timeout_seconds = 3600,
-    }, "color_picker")
-
-    local selected = trim(read_file(result_path))
+    local picker_ok, selected = pcall(function()
+        write_file(script_path, script)
+        run_runner_config({
+            mode = "run",
+            cwd = root,
+            command = {
+                powershell_path, "-NoLogo", "-NoProfile", "-NonInteractive",
+                "-Sta", "-WindowStyle", "Hidden", "-File", script_path,
+                "-ResultPath", result_path,
+            },
+            stdout_path = stdout_path,
+            done_path = done_path,
+            timeout_seconds = 3600,
+        }, "color_picker")
+        return trim(read_file(result_path))
+    end)
     remove_file(result_path)
     remove_file(script_path)
+    if not picker_ok then error(selected) end
     selected = normalize_hex(selected, "")
     if selected ~= "" then
         set_text(field_id, selected)
@@ -4641,7 +4660,12 @@ function HANDLERS.pick_color_safely(field_id, fallback)
         return
     end
     local ok, err = pcall(function() pick_windows_color(field_id, fallback) end)
-    if not ok then report_error(err) end
+    if not ok then
+        report_error(err)
+        local notice = tr("notice.color_manual")
+        append_log(notice)
+        set_progress(0, notice)
+    end
 end
 
 -- Keep UI bootstrap locals in a separate LuaJIT function scope.
