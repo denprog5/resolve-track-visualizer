@@ -14,7 +14,7 @@ Resolve Track Visualizer creates music player overlays for the audio clips of a 
 - Player presets: save the complete style (skin, layout, elements, colors, fonts) under a name, apply it later, rename, delete, and export/import it as a `.tviz-preset.json` file.
 - DJ-mix aware placement: tracks split across several audio tracks and overlapping in crossfades get one continuous row of players. The switch point is selectable (middle of the crossfade, start of the next track, or end of the current one), and a clip that plays entirely inside another track does not get its own player.
 - Trims on either side are respected: the time readout and progress start from the clip's source offset, and progress can show the position in the whole track or in the clip.
-- Non-blocking panel with live progress, Cancel, a style preview, and a log tab.
+- Non-blocking panel: look, timeline and a large preview on one page; fine-tuning on **Look**, presets and palettes in **Library**, log and language in **Service**.
 - MP3, WAV, FLAC, M4A, AAC and OGG metadata and embedded artwork; waveform analysis with loudness-aware scaling.
 - Russian and English UI.
 - Private Windows x64 release-candidate builds and a separate manual Linux x64 packaging canary.
@@ -35,7 +35,7 @@ sha256sum -c SHA256SUMS
 
 On the first launch, **Auto (system)** chooses Russian for a Russian system UI language and English for every other language. Existing settings created by the former Russian-only version remain Russian after migration.
 
-The language can be changed on the **Log** tab under **Language**. Close and reopen Track Visualizer after changing it; theme and style values are preserved. The installer also accepts `--language auto`, `--language en`, or `--language ru`.
+The language can be changed on the **Service** tab under **Language**. Close and reopen Track Visualizer after changing it; theme and style values are preserved. The installer also accepts `--language auto`, `--language en`, or `--language ru`.
 
 ## Install And Run
 
@@ -70,11 +70,11 @@ Uninstall removes only managed runtime files and the Resolve menu script. User s
 Basic workflow:
 
 1. Put music clips on audio tracks such as `A1`, `A2` and `A3`; overlapping crossfades and trims are fine.
-2. Open Track Visualizer. On **Create**, set the audio tracks (for example `1-3`), the video track for the players, and how overlapping tracks switch.
-3. Pick a skin and palette on **Style**, or a saved preset on **Create** or **Presets**.
+2. Open Track Visualizer. On **Players**, pick a skin, palette or saved preset; the preview updates immediately.
+3. Set the audio tracks (for example `1-3`), the video track for the players, and how overlapping tracks switch.
 4. Choose **Create players**. Running it again replaces the players on that video track; **Remove players** deletes them.
 
-Players are placed only on an empty range of the chosen video track. The plugin keeps its carrier clip and layers in a `Track Visualizer` Media Pool bin and never creates helper timelines. **Remove old helper timelines** on the **Log** tab cleans up timelines left by earlier preview versions.
+Players are placed only on an empty range of the chosen video track. The plugin keeps its carrier clip and layers in a `Track Visualizer` Media Pool bin and never creates helper timelines. **Remove old helper timelines** on the **Service** tab cleans up timelines left by earlier preview versions.
 
 ## Development
 

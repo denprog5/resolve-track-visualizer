@@ -635,28 +635,32 @@ local I18N = {
     en = {
         ["window.title"] = "Track Visualizer",
         ["app.subtitle"] = "Music player overlays for the audio clips on your timeline.",
-        ["tab.create"] = "Create",
-        ["tab.style"] = "Style",
-        ["tab.presets"] = "Presets",
-        ["tab.log"] = "Log",
+        ["tab.create"] = "Players",
+        ["tab.style"] = "Look",
+        ["tab.presets"] = "Library",
+        ["tab.log"] = "Service",
         ["section.timeline"] = "Timeline",
         ["field.audio_tracks"] = "Audio tracks",
         ["hint.audio_tracks"] = "For example 1-3 or 1,2",
-        ["field.video_track"] = "Players on video track",
+        ["field.video_track"] = "Video track",
         ["field.switch_mode"] = "Overlapping tracks",
-        ["hint.switch_mode"] = "A clip entirely inside another track gets no player.",
+        ["hint.switch_mode"] = "Where one player hands over to the next when tracks overlap in a crossfade. A clip that plays entirely inside another track gets no player.",
         ["switch_mode.overlap_middle"] = "Switch in the middle of the crossfade",
         ["switch_mode.next_start"] = "Switch when the next track starts",
         ["switch_mode.current_end"] = "Switch when the current track ends",
-        ["field.update_scope"] = "Clips",
+        ["field.update_scope"] = "Only clips",
         ["scope.placeholder"] = "all, 3,5-7 or @playhead",
         ["scope.alias_all"] = "all",
         ["scope.alias_current"] = "current",
         ["scope.hint"] = "Empty = all clips; 3,5-7 = clip numbers from the list; @playhead = the clip under the playhead.",
         ["action.list_clips"] = "List clips",
-        ["section.style_summary"] = "Style",
+        ["section.style_summary"] = "Player look",
+        ["action.customize"] = "Fine-tune the look",
+        ["action.save_as_preset"] = "Save as preset",
+        ["hint.audio_tracks_tip"] = "Audio tracks with music clips, for example 1-3 or 1,2.",
+        ["hint.video_track_tip"] = "Players are placed on this video track. Use an empty track.",
         ["field.preset"] = "Preset",
-        ["preset.current_style"] = "Current style",
+        ["preset.current_style"] = "Custom settings",
         ["field.active_style"] = "{skin} · {palette}",
         ["action.create"] = "Create players",
         ["action.cancel"] = "Cancel",
@@ -679,10 +683,7 @@ local I18N = {
         ["error.unknown"] = "Unknown error",
         ["error.log_prefix"] = "ERROR: {message}",
         ["error.busy"] = "Another operation is still running.",
-        ["section.preview"] = "Preview",
-        ["action.refresh_preview"] = "Refresh",
-        ["action.open_preview"] = "Open full size",
-        ["preview.idle"] = "Preview of the current style",
+        ["preview.idle"] = "Click the preview to open it full size",
         ["preview.rendering"] = "Rendering preview...",
         ["preview.failed"] = "Preview failed: {details}",
         ["preview.sample_title"] = "Preview Track Title",
@@ -722,8 +723,8 @@ local I18N = {
         ["anchor.top_right"] = "Top right",
         ["anchor.center"] = "Center",
         ["field.scale"] = "Size, %",
-        ["field.margin_x"] = "Side margin",
-        ["field.margin_y"] = "Top/bottom margin",
+        ["field.margin_x"] = "Margins: side",
+        ["field.margin_y"] = "top/bottom",
         ["field.elements"] = "Elements",
         ["field.cover"] = "Cover",
         ["field.artist"] = "Artist",
@@ -746,8 +747,9 @@ local I18N = {
         ["progress_basis.clip"] = "Position in the clip",
         ["field.bar_count"] = "Waveform bars",
         ["field.brand_text"] = "Brand label",
-        ["field.fallback_logo"] = "Cover when a track has none",
-        ["action.choose_png"] = "Choose PNG",
+        ["field.fallback_logo"] = "Default cover",
+        ["hint.fallback_logo"] = "Used when a track has no embedded cover art.",
+        ["action.choose_png"] = "Choose...",
         ["action.default"] = "Default",
         ["field.panel"] = "Panel",
         ["field.border"] = "Border",
@@ -758,21 +760,20 @@ local I18N = {
         ["field.opacity"] = "Opacity",
         ["field.glass_strength"] = "Glass strength",
         ["field.radius"] = "Corner radius",
-        ["field.color"] = "Pick",
+        ["field.color"] = "Click to pick a color",
         ["field.title_font"] = "Title font",
         ["field.artist_font"] = "Artist font",
         ["field.time_font"] = "Time font",
         ["field.size"] = "Size",
         ["field.time_bold"] = "Bold",
         ["action.reset_style"] = "Reset skin to defaults",
-        ["hint.unsupported"] = "Greyed-out elements are not part of this skin.",
-        ["presets.title"] = "Player presets",
+        ["presets.title"] = "Presets",
         ["presets.hint"] = "A preset stores the skin and every style setting: layout, elements, colors and fonts.",
-        ["field.preset_list"] = "Saved presets",
+        ["field.preset_list"] = "Saved",
         ["field.preset_name"] = "Name",
         ["action.preset_apply"] = "Apply",
         ["action.preset_delete"] = "Delete",
-        ["action.preset_save"] = "Save current style",
+        ["action.preset_save"] = "Save current look",
         ["action.preset_rename"] = "Rename",
         ["action.preset_export"] = "Export",
         ["action.preset_import"] = "Import...",
@@ -780,7 +781,7 @@ local I18N = {
         ["presets.empty"] = "No presets yet",
         ["palettes.title"] = "Palettes",
         ["palettes.hint"] = "A palette stores only colors and opacity, so it can be reused with any skin.",
-        ["field.palette_name"] = "Palette name",
+        ["field.palette_name"] = "Name",
         ["action.palette_save"] = "Save current colors",
         ["action.palette_delete"] = "Delete",
         ["palette.custom_mark"] = "{name} (mine)",
@@ -799,7 +800,8 @@ local I18N = {
         ["error.preset_not_selected"] = "Select a preset first.",
         ["error.palette_builtin"] = "Built-in palettes cannot be deleted.",
         ["error.import_invalid"] = "The file is not a Track Visualizer preset or palette: {path}",
-        ["diagnostics.title"] = "Log and diagnostics",
+        ["diagnostics.title"] = "Log",
+        ["section.interface"] = "Interface",
         ["diagnostics.paths"] = "Log: {log}\nClip property dump: {dump}\nLast error: {error}",
         ["field.language"] = "Language",
         ["language.auto"] = "Auto (system)",
@@ -880,28 +882,32 @@ local I18N = {
     ru = {
         ["window.title"] = "Track Visualizer",
         ["app.subtitle"] = "Плееры с обложкой, названием и прогрессом для аудиоклипов на таймлайне.",
-        ["tab.create"] = "Создать",
-        ["tab.style"] = "Стиль",
-        ["tab.presets"] = "Пресеты",
-        ["tab.log"] = "Журнал",
+        ["tab.create"] = "Плееры",
+        ["tab.style"] = "Вид",
+        ["tab.presets"] = "Библиотека",
+        ["tab.log"] = "Сервис",
         ["section.timeline"] = "Таймлайн",
         ["field.audio_tracks"] = "Аудиодорожки",
         ["hint.audio_tracks"] = "Например 1-3 или 1,2",
-        ["field.video_track"] = "Плееры на видеодорожке",
+        ["field.video_track"] = "Видеодорожка",
         ["field.switch_mode"] = "Наложение треков",
-        ["hint.switch_mode"] = "Клип целиком внутри другого трека не получает плеер.",
+        ["hint.switch_mode"] = "Где один плеер сменяется другим, когда треки перекрываются в кроссфейде. Клип, целиком звучащий внутри другого трека, плеера не получает.",
         ["switch_mode.overlap_middle"] = "Сменить в середине перехода",
         ["switch_mode.next_start"] = "Сменить, когда начался следующий трек",
         ["switch_mode.current_end"] = "Сменить, когда закончился текущий трек",
-        ["field.update_scope"] = "Клипы",
+        ["field.update_scope"] = "Только клипы",
         ["scope.placeholder"] = "все, 3,5-7 или @playhead",
         ["scope.alias_all"] = "все",
         ["scope.alias_current"] = "текущий",
         ["scope.hint"] = "Пусто = все клипы; 3,5-7 = номера из списка; @playhead = клип под плейхедом.",
         ["action.list_clips"] = "Список клипов",
-        ["section.style_summary"] = "Стиль",
+        ["section.style_summary"] = "Вид плеера",
+        ["action.customize"] = "Настроить детали",
+        ["action.save_as_preset"] = "Сохранить как пресет",
+        ["hint.audio_tracks_tip"] = "Аудиодорожки с музыкой, например 1-3 или 1,2.",
+        ["hint.video_track_tip"] = "На эту видеодорожку встанут плееры. Лучше выбрать пустую.",
         ["field.preset"] = "Пресет",
-        ["preset.current_style"] = "Текущий стиль",
+        ["preset.current_style"] = "Свои настройки",
         ["field.active_style"] = "{skin} · {palette}",
         ["action.create"] = "Создать плееры",
         ["action.cancel"] = "Отмена",
@@ -924,10 +930,7 @@ local I18N = {
         ["error.unknown"] = "Неизвестная ошибка",
         ["error.log_prefix"] = "ОШИБКА: {message}",
         ["error.busy"] = "Предыдущая операция ещё выполняется.",
-        ["section.preview"] = "Превью",
-        ["action.refresh_preview"] = "Обновить",
-        ["action.open_preview"] = "Открыть крупно",
-        ["preview.idle"] = "Превью текущего стиля",
+        ["preview.idle"] = "Нажмите на превью, чтобы открыть крупно",
         ["preview.rendering"] = "Рисую превью...",
         ["preview.failed"] = "Превью не получилось: {details}",
         ["preview.sample_title"] = "Название трека",
@@ -967,8 +970,8 @@ local I18N = {
         ["anchor.top_right"] = "Сверху справа",
         ["anchor.center"] = "По центру",
         ["field.scale"] = "Размер, %",
-        ["field.margin_x"] = "Отступ сбоку",
-        ["field.margin_y"] = "Отступ сверху/снизу",
+        ["field.margin_x"] = "Отступы: сбоку",
+        ["field.margin_y"] = "сверху/снизу",
         ["field.elements"] = "Элементы",
         ["field.cover"] = "Обложка",
         ["field.artist"] = "Исполнитель",
@@ -991,8 +994,9 @@ local I18N = {
         ["progress_basis.clip"] = "Позицию в клипе",
         ["field.bar_count"] = "Столбиков волны",
         ["field.brand_text"] = "Текст бренда",
-        ["field.fallback_logo"] = "Обложка, если у трека её нет",
-        ["action.choose_png"] = "Выбрать PNG",
+        ["field.fallback_logo"] = "Обложка по умолчанию",
+        ["hint.fallback_logo"] = "Используется, если у трека нет встроенной обложки.",
+        ["action.choose_png"] = "Выбрать...",
         ["action.default"] = "По умолчанию",
         ["field.panel"] = "Панель",
         ["field.border"] = "Рамка",
@@ -1003,21 +1007,20 @@ local I18N = {
         ["field.opacity"] = "Непрозрачность",
         ["field.glass_strength"] = "Сила стекла",
         ["field.radius"] = "Скругление",
-        ["field.color"] = "Выбрать",
+        ["field.color"] = "Нажмите, чтобы выбрать цвет",
         ["field.title_font"] = "Шрифт названия",
         ["field.artist_font"] = "Шрифт исполнителя",
         ["field.time_font"] = "Шрифт времени",
         ["field.size"] = "Размер",
         ["field.time_bold"] = "Жирный",
         ["action.reset_style"] = "Сбросить скин",
-        ["hint.unsupported"] = "Серые элементы не входят в этот скин.",
-        ["presets.title"] = "Пресеты плееров",
+        ["presets.title"] = "Пресеты",
         ["presets.hint"] = "Пресет хранит скин и все настройки стиля: расположение, элементы, цвета и шрифты.",
-        ["field.preset_list"] = "Сохранённые пресеты",
+        ["field.preset_list"] = "Сохранённые",
         ["field.preset_name"] = "Название",
         ["action.preset_apply"] = "Применить",
         ["action.preset_delete"] = "Удалить",
-        ["action.preset_save"] = "Сохранить текущий стиль",
+        ["action.preset_save"] = "Сохранить текущий вид",
         ["action.preset_rename"] = "Переименовать",
         ["action.preset_export"] = "Экспорт",
         ["action.preset_import"] = "Импорт...",
@@ -1025,7 +1028,7 @@ local I18N = {
         ["presets.empty"] = "Пресетов пока нет",
         ["palettes.title"] = "Палитры",
         ["palettes.hint"] = "Палитра хранит только цвета и прозрачность, её можно применять к любому скину.",
-        ["field.palette_name"] = "Название палитры",
+        ["field.palette_name"] = "Название",
         ["action.palette_save"] = "Сохранить текущие цвета",
         ["action.palette_delete"] = "Удалить",
         ["palette.custom_mark"] = "{name} (моя)",
@@ -1044,7 +1047,8 @@ local I18N = {
         ["error.preset_not_selected"] = "Сначала выберите пресет.",
         ["error.palette_builtin"] = "Встроенные палитры удалить нельзя.",
         ["error.import_invalid"] = "Файл не является пресетом или палитрой Track Visualizer: {path}",
-        ["diagnostics.title"] = "Журнал и диагностика",
+        ["diagnostics.title"] = "Журнал",
+        ["section.interface"] = "Интерфейс",
         ["diagnostics.paths"] = "Журнал: {log}\nСвойства клипов: {dump}\nПоследняя ошибка: {error}",
         ["field.language"] = "Язык",
         ["language.auto"] = "Авто (системный)",
@@ -2349,9 +2353,9 @@ function set_progress(percent, status)
         local fraction = math.max(0, math.min(1, (tonumber(percent) or 0) / 100))
         local edge = string.format("%.4f", fraction)
         local after = string.format("%.4f", math.min(1, fraction + 0.0005))
-        bar.StyleSheet = "QLabel { min-height: 6px; max-height: 6px; border-radius: 3px; border: none; "
+        bar.StyleSheet = "QLabel { min-height: 4px; max-height: 4px; border-radius: 2px; border: none; "
             .. "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5b8def, stop:" .. edge .. " #5b8def, "
-            .. "stop:" .. after .. " #2c2f36, stop:1 #2c2f36); }"
+            .. "stop:" .. after .. " #26282e, stop:1 #26282e); }"
     end
 end
 
@@ -3681,8 +3685,10 @@ function App.set_busy(is_busy)
     local cancel = win and win:Find("CancelRun") or nil
     if cancel then
         pcall(function() cancel.Enabled = is_busy and true or false end)
+        pcall(function() cancel.Hidden = not is_busy end)
         pcall(function() cancel.Text = tr("action.cancel") end)
     end
+    pcall(function() win:RecalcLayout() end)
 end
 
 function Pipeline.start()
@@ -4141,6 +4147,23 @@ function Editor.apply(design)
     set_text("BrandText", design.brand_text)
     Editor.suppress = false
     Editor.update_capabilities()
+    Editor.update_swatches(design)
+end
+
+function Editor.update_swatches(design)
+    for _, color in ipairs(Editor.colors) do
+        local swatch = win and win:Find("Pick" .. color.id) or nil
+        if swatch then pcall(function() swatch.StyleSheet = App.swatch_style(design[color.key]) end) end
+    end
+end
+
+-- The Preset selector on the main page shows "Custom settings" as soon as the look is edited.
+function Editor.reset_quick_preset()
+    Editor.active_preset = nil
+    local was = Editor.suppress
+    Editor.suppress = true
+    Editor.set_combo("QuickPreset", 0)
+    Editor.suppress = was
 end
 
 function Editor.update_capabilities()
@@ -4155,7 +4178,6 @@ function Editor.update_capabilities()
     for _, enum in ipairs(Editor.enums) do enable(enum.id, enum.feature == nil or Style.supports(skin, enum.feature)) end
     enable("TimeBold", Style.supports(skin, "time"))
     enable("BrandText", Style.supports(skin, "brand"))
-    enable("PickGlass", Style.supports(skin, "glass"))
 end
 
 function Editor.palette_names()
@@ -4195,22 +4217,29 @@ function Editor.refresh_palette_combos()
     local skin = Settings.data.active_skin
     local current = Editor.detect_palette(Settings.data.styles[skin])
     Settings.data.palette_names[skin] = current
+    local was = Editor.suppress
+    Editor.suppress = true
     Editor.fill_combo("PaletteSelector", labels, Editor.index_of(names, current))
     local library = {}
     for index = 2, #labels do table.insert(library, labels[index]) end
     Editor.fill_combo("PaletteLibrary", library, math.max(0, Editor.index_of(names, current) - 1))
-    local summary = win:Find("ActiveStyle")
-    if summary then
-        summary.Text = tr("field.active_style", { skin = Style.skin_label(skin), palette = Style.palette_label(current) })
+    Editor.suppress = was
+    local title = win:Find("StyleTitle")
+    if title then
+        title.Text = tr("field.active_style", { skin = Style.skin_label(skin), palette = Style.palette_label(current) })
     end
 end
 
 function Editor.changed()
     if Editor.suppress or not Settings.data then return end
     local skin = Settings.data.active_skin
-    Settings.data.styles[skin] = Editor.read()
+    local design = Editor.read()
+    if json_encode(design, "") == json_encode(Settings.data.styles[skin] or {}, "") then return end
+    Settings.data.styles[skin] = design
     Editor.update_capabilities()
+    Editor.update_swatches(Settings.data.styles[skin])
     Editor.refresh_palette_combos()
+    Editor.reset_quick_preset()
     Settings.mark_dirty()
     Preview.request()
 end
@@ -4289,10 +4318,17 @@ function Presets.refresh(selected_name)
         if preset.name == selected_name then index = position - 1 end
     end
     if #labels == 0 then labels = { tr("presets.empty") } end
+    local was = Editor.suppress
+    Editor.suppress = true
     Editor.fill_combo("PresetList", labels, index)
     local quick = { tr("preset.current_style") }
-    for _, preset in ipairs(Settings.data.presets) do table.insert(quick, preset.name) end
-    Editor.fill_combo("QuickPreset", quick, 0)
+    local quick_index = 0
+    for position, preset in ipairs(Settings.data.presets) do
+        table.insert(quick, preset.name)
+        if preset.name == Editor.active_preset then quick_index = position end
+    end
+    Editor.fill_combo("QuickPreset", quick, quick_index)
+    Editor.suppress = was
 end
 
 function Presets.selected()
@@ -4304,6 +4340,8 @@ function Presets.apply(preset)
     if not preset then error(tr("error.preset_not_selected")) end
     Settings.data.styles[preset.skin] = Style.sanitize(preset.skin, preset.design)
     Editor.select_skin(preset.skin)
+    Editor.active_preset = preset.name
+    Presets.refresh(preset.name)
     append_log(tr("log.preset_applied", { name = preset.name }))
 end
 
@@ -4323,6 +4361,7 @@ function Presets.save()
         table.insert(Settings.data.presets, { name = string.sub(name, 1, 60), skin = skin, design = copy_table(Settings.data.styles[skin]) })
     end
     save_current_style()
+    Editor.active_preset = name
     Presets.refresh(name)
     append_log(tr("log.preset_saved", { name = name }))
 end
@@ -4469,14 +4508,7 @@ function HANDLERS.pick_color_safely(field_id, fallback)
 end
 
 function HANDLERS.on_create()
-    HANDLERS.guard(function()
-        local quick = Editor.combo_index("QuickPreset")
-        if quick > 0 and Settings.data.presets[quick] then
-            Presets.apply(Settings.data.presets[quick])
-            Editor.set_combo("QuickPreset", 0)
-        end
-        Pipeline.start()
-    end)
+    HANDLERS.guard(function() Pipeline.start() end)
 end
 
 function HANDLERS.on_list_clips()
@@ -4485,8 +4517,7 @@ function HANDLERS.on_list_clips()
         local scan = collect_jobs(project, timeline, false)
         append_log(tr("log.clips_listed", { tracks = table.concat(scan.audio_tracks, ","), count = #scan.jobs }))
         append_log(tr("log.scope_help"))
-        Editor.set_combo("MainTabs", 3)
-        App.show_page(3)
+        App.go_to_page(3)
     end)
 end
 
@@ -4628,6 +4659,11 @@ function App.show_page(index)
     pcall(function() win:RecalcLayout() end)
 end
 
+function App.go_to_page(index)
+    Editor.set_combo("MainTabs", index)
+    App.show_page(index)
+end
+
 function App.show_style_page(index)
     for position, element_id in ipairs(App.style_pages) do
         local page = win:Find(element_id)
@@ -4636,53 +4672,102 @@ function App.show_style_page(index)
     pcall(function() win:RecalcLayout() end)
 end
 
-function App.row(label, children, label_width)
-    local items = { ui:Label({ Text = label, MinimumSize = { label_width or 150, 0 }, Weight = 0 }) }
+App.LABEL_WIDTH = 132
+
+function App.row(label, children, label_width, tooltip)
+    local items = { ui:Label({ Text = label, MinimumSize = { label_width or App.LABEL_WIDTH, 0 }, Weight = 0, ToolTip = tooltip }) }
     for _, child in ipairs(children) do table.insert(items, child) end
     table.insert(items, ui:HGap(0, 1))
-    return ui:HGroup({ Weight = 0 }, items)
+    return ui:HGroup({ Weight = 0, Spacing = 8 }, items)
 end
 
-function App.spin(element_id, minimum, maximum)
-    return ui:SpinBox({ ID = element_id, Minimum = minimum, Maximum = maximum, MinimumSize = { 80, 26 }, MaximumSize = { 96, 26 }, Weight = 0 })
+function App.spin(element_id, minimum, maximum, tooltip)
+    return ui:SpinBox({ ID = element_id, Minimum = minimum, Maximum = maximum, MinimumSize = { 76, 28 }, MaximumSize = { 90, 28 }, Weight = 0, ToolTip = tooltip })
 end
 
-function App.preview_panel(suffix, fonts)
+function App.section(text, fonts)
+    return ui:Label({ Text = text, Font = fonts.section, Weight = 0, StyleSheet = App.widget_styles.section })
+end
+
+function App.hint(text, fonts, element_id)
+    return ui:Label({ ID = element_id, Text = text, Font = fonts.hint, WordWrap = true, Weight = 0, StyleSheet = App.widget_styles.muted })
+end
+
+function App.divider()
+    return ui:Label({ Text = "", MinimumSize = { 0, 1 }, MaximumSize = { 16777215, 1 }, Weight = 0, StyleSheet = App.widget_styles.divider })
+end
+
+function App.preview_panel(suffix, fonts, size)
+    local width, height = size[1], size[2]
     return ui:VGroup({ Weight = 0, Spacing = 6 }, {
-        ui:Label({ Text = tr("section.preview"), Font = fonts.section, Weight = 0 }),
-        ui:Button({ ID = "Preview" .. suffix, Flat = true, IconSize = { 400, 225 }, MinimumSize = { 412, 237 }, MaximumSize = { 412, 237 }, Weight = 0, StyleSheet = App.widget_styles.preview }),
-        ui:Label({ ID = "PreviewStatus" .. suffix, Text = tr("preview.idle"), Font = fonts.hint, WordWrap = true, Weight = 0 }),
-        ui:HGroup({ Weight = 0 }, {
-            ui:Button({ ID = "RefreshPreview" .. suffix, Text = tr("action.refresh_preview"), Weight = 0 }),
-            ui:Button({ ID = "OpenPreview" .. suffix, Text = tr("action.open_preview"), Weight = 0 }),
-            ui:HGap(0, 1),
+        ui:Button({
+            ID = "Preview" .. suffix, Flat = true, IconSize = { width - 12, height - 12 },
+            MinimumSize = { width, height }, MaximumSize = { width, height }, Weight = 0,
+            ToolTip = tr("preview.idle"), StyleSheet = App.widget_styles.preview(width, height),
         }),
+        App.hint(tr("preview.idle"), fonts, "PreviewStatus" .. suffix),
         ui:VGap(0, 1),
     })
 end
 
-function App.build(fonts)
-    local color_rows = {}
-    for _, color in ipairs(Editor.colors) do
-        local children = {
-            ui:LineEdit({ ID = color.id, MinimumSize = { 96, 26 }, MaximumSize = { 110, 26 }, Weight = 0 }),
-            ui:Button({ ID = "Pick" .. color.id, Text = tr("field.color"), MaximumSize = { 90, 26 }, Weight = 0 }),
-        }
-        if color.alpha then
-            table.insert(children, ui:Label({ Text = tr("field.opacity"), Weight = 0 }))
-            table.insert(children, App.spin(color.alpha, 0, 255))
-        end
-        table.insert(color_rows, App.row(tr(color.label), children, 170))
-    end
-    table.insert(color_rows, App.row(tr("field.glass_strength"), { App.spin("GlassStrength", 0, 100) }, 170))
-    table.insert(color_rows, App.row(tr("field.radius"), { App.spin("CornerRadius", 0, 64) }, 170))
-    table.insert(color_rows, ui:VGap(0, 1))
+function App.swatch_style(color)
+    return "QPushButton { min-width: 26px; max-width: 26px; min-height: 26px; max-height: 26px; padding: 0;"
+        .. " border: 1px solid #4a4e57; border-radius: 6px; background: " .. tostring(color or "#000000") .. "; }"
+        .. " QPushButton:hover { border-color: #b8bdc6; }"
+end
 
+function App.build_create_page(fonts)
+    local controls = ui:VGroup({ Weight = 1, Spacing = 8 }, {
+        App.section(tr("section.style_summary"), fonts),
+        App.row(tr("field.skin"), { ui:ComboBox({ ID = "SkinSelector", MinimumSize = { 250, 28 }, Weight = 0 }) }),
+        App.row(tr("field.palette"), { ui:ComboBox({ ID = "PaletteSelector", MinimumSize = { 250, 28 }, Weight = 0 }) }),
+        App.row(tr("field.preset"), {
+            ui:ComboBox({ ID = "QuickPreset", MinimumSize = { 250, 28 }, Weight = 0, ToolTip = tr("presets.hint") }),
+        }),
+        App.row("", {
+            ui:Button({ ID = "OpenStyle", Text = tr("action.customize") .. "  >", Flat = true, Weight = 0, StyleSheet = App.widget_styles.link }),
+            ui:Button({ ID = "SaveAsPreset", Text = tr("action.save_as_preset") .. "  >", Flat = true, Weight = 0, StyleSheet = App.widget_styles.link }),
+        }),
+        ui:VGap(4, 0),
+        App.divider(),
+        ui:VGap(4, 0),
+        App.section(tr("section.timeline"), fonts),
+        App.row(tr("field.audio_tracks"), {
+            ui:LineEdit({ ID = "AudioTracks", PlaceholderText = "1-3", MinimumSize = { 90, 28 }, MaximumSize = { 110, 28 }, Weight = 0, ToolTip = tr("hint.audio_tracks_tip") }),
+            ui:HGap(10, 0),
+            ui:Label({ Text = tr("field.video_track"), Weight = 0, ToolTip = tr("hint.video_track_tip") }),
+            App.spin("VideoTrack", 1, 64, tr("hint.video_track_tip")),
+        }, nil, tr("hint.audio_tracks_tip")),
+        App.row(tr("field.switch_mode"), {
+            ui:ComboBox({ ID = "SwitchMode", MinimumSize = { 300, 28 }, Weight = 0, ToolTip = tr("hint.switch_mode") }),
+        }, nil, tr("hint.switch_mode")),
+        App.row(tr("field.update_scope"), {
+            ui:LineEdit({ ID = "UpdateScope", PlaceholderText = tr("scope.placeholder"), MinimumSize = { 196, 28 }, MaximumSize = { 250, 28 }, Weight = 0, ToolTip = tr("scope.hint") }),
+            ui:Button({ ID = "ListClips", Text = tr("action.list_clips"), Weight = 0, ToolTip = tr("log.scope_help") }),
+        }, nil, tr("scope.hint")),
+        ui:VGap(16, 0),
+        ui:Button({ ID = "CreatePlayers", Text = tr("action.create"), MinimumSize = { 0, 44 }, Weight = 0, StyleSheet = App.widget_styles.primary }),
+        ui:Label({ ID = "ProgressBar", Text = "", MinimumSize = { 0, 4 }, MaximumSize = { 16777215, 4 }, Weight = 0 }),
+        ui:HGroup({ Weight = 0, Spacing = 8 }, {
+            ui:Label({ ID = "ProgressStatus", Text = tr("status.ready"), WordWrap = true, Weight = 1, StyleSheet = App.widget_styles.muted }),
+            ui:Button({ ID = "CancelRun", Text = tr("action.cancel"), Hidden = true, Weight = 0 }),
+            ui:Button({ ID = "RemovePlayers", Text = tr("action.remove_players"), MinimumSize = { 190, 28 }, Weight = 0, StyleSheet = App.widget_styles.quiet }),
+        }),
+        ui:Label({ ID = "LastError", Text = "", Hidden = true, WordWrap = true, Font = fonts.hint, Weight = 0, StyleSheet = App.widget_styles.error }),
+        ui:VGap(0, 1),
+    })
+    return ui:HGroup({ ID = "PageCreate", Weight = 1, Spacing = 20 }, {
+        controls,
+        App.preview_panel("Create", fonts, App.PREVIEW_MAIN),
+    })
+end
+
+function App.build_style_page(fonts)
     local toggle_rows = {}
     local current = {}
     for index, toggle in ipairs(Editor.toggles) do
-        table.insert(current, ui:CheckBox({ ID = toggle.id, Text = tr(toggle.label), MinimumSize = { 150, 0 }, Weight = 0 }))
-        if #current == 4 or index == #Editor.toggles then
+        table.insert(current, ui:CheckBox({ ID = toggle.id, Text = tr(toggle.label), MinimumSize = { 170, 0 }, Weight = 0, StyleSheet = "QCheckBox { min-width: 170px; }" }))
+        if #current == 3 or index == #Editor.toggles then
             table.insert(current, ui:HGap(0, 1))
             table.insert(toggle_rows, ui:HGroup({ Weight = 0 }, current))
             current = {}
@@ -4690,160 +4775,204 @@ function App.build(fonts)
     end
 
     local layout_children = {
-        App.row(tr("field.anchor"), { ui:ComboBox({ ID = "Anchor", MinimumSize = { 200, 26 }, Weight = 0 }) }),
-        App.row(tr("field.scale"), {
-            App.spin("Scale", 25, 400),
-            ui:Label({ Text = tr("field.margin_x"), Weight = 0 }), App.spin("MarginX", 0, 2000),
-            ui:Label({ Text = tr("field.margin_y"), Weight = 0 }), App.spin("MarginY", 0, 2000),
+        App.row(tr("field.anchor"), { ui:ComboBox({ ID = "Anchor", MinimumSize = { 200, 28 }, Weight = 0 }) }),
+        App.row(tr("field.scale"), { App.spin("Scale", 25, 400) }),
+        App.row(tr("field.margin_x"), {
+            App.spin("MarginX", 0, 2000),
+            ui:Label({ Text = tr("field.margin_y"), Weight = 0 }),
+            App.spin("MarginY", 0, 2000),
         }),
-        ui:Label({ Text = tr("field.elements"), Font = fonts.section, Weight = 0 }),
+        ui:VGap(4, 0),
+        App.section(tr("field.elements"), fonts),
     }
     for _, row in ipairs(toggle_rows) do table.insert(layout_children, row) end
-    table.insert(layout_children, ui:Label({ Text = tr("hint.unsupported"), Font = fonts.hint, Weight = 0 }))
-    table.insert(layout_children, App.row(tr("field.time_mode"), { ui:ComboBox({ ID = "TimeMode", MinimumSize = { 240, 26 }, Weight = 0 }) }))
-    table.insert(layout_children, App.row(tr("field.progress_basis"), { ui:ComboBox({ ID = "ProgressBasis", MinimumSize = { 240, 26 }, Weight = 0 }) }))
-    table.insert(layout_children, App.row(tr("field.bar_count"), { App.spin("BarCount", 8, 200) }))
-    table.insert(layout_children, App.row(tr("field.brand_text"), { ui:LineEdit({ ID = "BrandText", MinimumSize = { 220, 26 }, Weight = 0 }) }))
-    table.insert(layout_children, App.row(tr("field.fallback_logo"), {
-        ui:LineEdit({ ID = "FallbackLogoPath", MinimumSize = { 220, 26 }, Weight = 1 }),
-        ui:Button({ ID = "BrowseFallbackLogo", Text = tr("action.choose_png"), Weight = 0 }),
-        ui:Button({ ID = "DefaultFallbackLogo", Text = tr("action.default"), Weight = 0 }),
-    }))
-    table.insert(layout_children, ui:VGap(0, 1))
+    for _, row in ipairs({
+        ui:VGap(4, 0),
+        App.row(tr("field.time_mode"), { ui:ComboBox({ ID = "TimeMode", MinimumSize = { 240, 28 }, Weight = 0 }) }),
+        App.row(tr("field.progress_basis"), { ui:ComboBox({ ID = "ProgressBasis", MinimumSize = { 240, 28 }, Weight = 0 }) }),
+        App.row(tr("field.bar_count"), { App.spin("BarCount", 8, 200) }),
+        App.row(tr("field.brand_text"), { ui:LineEdit({ ID = "BrandText", MinimumSize = { 200, 28 }, Weight = 0 }) }),
+        App.row(tr("field.fallback_logo"), {
+            ui:LineEdit({ ID = "FallbackLogoPath", MinimumSize = { 160, 28 }, Weight = 1, ToolTip = tr("hint.fallback_logo") }),
+            ui:Button({ ID = "BrowseFallbackLogo", Text = tr("action.choose_png"), Weight = 0 }),
+            ui:Button({ ID = "DefaultFallbackLogo", Text = tr("action.default"), Weight = 0 }),
+        }, nil, tr("hint.fallback_logo")),
+        ui:VGap(0, 1),
+    }) do table.insert(layout_children, row) end
 
+    local color_rows = {}
+    for _, color in ipairs(Editor.colors) do
+        local children = {
+            ui:Button({ ID = "Pick" .. color.id, Text = "", Weight = 0, ToolTip = tr("field.color"), StyleSheet = App.swatch_style("#000000") }),
+            ui:LineEdit({ ID = color.id, MinimumSize = { 92, 28 }, MaximumSize = { 100, 28 }, Weight = 0 }),
+        }
+        if color.alpha then
+            table.insert(children, ui:HGap(8, 0))
+            table.insert(children, ui:Label({ Text = tr("field.opacity"), Weight = 0 }))
+            table.insert(children, App.spin(color.alpha, 0, 255))
+        end
+        table.insert(color_rows, App.row(tr(color.label), children, 150))
+    end
+    table.insert(color_rows, ui:VGap(4, 0))
+    table.insert(color_rows, App.row(tr("field.glass_strength"), { App.spin("GlassStrength", 0, 100) }, 150))
+    table.insert(color_rows, App.row(tr("field.radius"), { App.spin("CornerRadius", 0, 64) }, 150))
+    table.insert(color_rows, ui:VGap(0, 1))
+
+    local function font_row(label, font_id, size_id, extra)
+        local children = {
+            ui:ComboBox({ ID = font_id, Editable = true, MinimumSize = { 210, 28 }, Weight = 0 }),
+            ui:Label({ Text = tr("field.size"), Weight = 0 }),
+            App.spin(size_id, 8, 96),
+        }
+        if extra then table.insert(children, extra) end
+        return App.row(label, children, 150)
+    end
     local text_children = {
-        App.row(tr("field.title_font"), { ui:ComboBox({ ID = "TitleFontFamily", Editable = true, MinimumSize = { 220, 26 }, Weight = 0 }), ui:Label({ Text = tr("field.size"), Weight = 0 }), App.spin("TitleSize", 8, 96) }, 170),
-        App.row(tr("field.artist_font"), { ui:ComboBox({ ID = "ArtistFontFamily", Editable = true, MinimumSize = { 220, 26 }, Weight = 0 }), ui:Label({ Text = tr("field.size"), Weight = 0 }), App.spin("ArtistSize", 8, 96) }, 170),
-        App.row(tr("field.time_font"), { ui:ComboBox({ ID = "TimeFontFamily", Editable = true, MinimumSize = { 220, 26 }, Weight = 0 }), ui:Label({ Text = tr("field.size"), Weight = 0 }), App.spin("MetaSize", 8, 96), ui:CheckBox({ ID = "TimeBold", Text = tr("field.time_bold"), Weight = 0 }) }, 170),
+        font_row(tr("field.title_font"), "TitleFontFamily", "TitleSize"),
+        font_row(tr("field.artist_font"), "ArtistFontFamily", "ArtistSize"),
+        font_row(tr("field.time_font"), "TimeFontFamily", "MetaSize", ui:CheckBox({ ID = "TimeBold", Text = tr("field.time_bold"), Weight = 0 })),
         ui:VGap(0, 1),
     }
 
-    return ui:VGroup({ Spacing = 8 }, {
-        ui:HGroup({ Weight = 0 }, {
-            ui:Label({ Text = tr("window.title"), Font = fonts.header, Weight = 0 }),
-            ui:HGap(12, 0),
-            ui:Label({ Text = tr("app.subtitle"), Font = fonts.hint, Weight = 1 }),
-        }),
-        ui:TabBar({ ID = "MainTabs", Weight = 0 }),
-
-        ui:HGroup({ ID = "PageCreate", Weight = 1, Spacing = 16 }, {
-            ui:VGroup({ Weight = 1, Spacing = 6 }, {
-                ui:Label({ Text = tr("section.timeline"), Font = fonts.section, Weight = 0 }),
-                App.row(tr("field.audio_tracks"), { ui:LineEdit({ ID = "AudioTracks", MinimumSize = { 120, 26 }, MaximumSize = { 160, 26 }, Weight = 0 }), ui:Label({ Text = tr("hint.audio_tracks"), Font = fonts.hint, Weight = 0 }) }, 170),
-                App.row(tr("field.video_track"), { App.spin("VideoTrack", 1, 64) }, 170),
-                App.row(tr("field.switch_mode"), { ui:ComboBox({ ID = "SwitchMode", MinimumSize = { 260, 26 }, Weight = 0 }) }, 170),
-                ui:Label({ Text = tr("hint.switch_mode"), Font = fonts.hint, WordWrap = true, Weight = 0 }),
-                App.row(tr("field.update_scope"), { ui:LineEdit({ ID = "UpdateScope", PlaceholderText = tr("scope.placeholder"), MinimumSize = { 160, 26 }, Weight = 1 }), ui:Button({ ID = "ListClips", Text = tr("action.list_clips"), Weight = 0 }) }, 170),
-                ui:Label({ Text = tr("scope.hint"), Font = fonts.hint, WordWrap = true, Weight = 0 }),
-                ui:VGap(6, 0),
-                ui:Label({ Text = tr("section.style_summary"), Font = fonts.section, Weight = 0 }),
-                App.row(tr("field.preset"), { ui:ComboBox({ ID = "QuickPreset", MinimumSize = { 220, 26 }, Weight = 0 }) }, 170),
-                ui:Label({ ID = "ActiveStyle", Text = "", Weight = 0 }),
-                ui:VGap(10, 0),
-                ui:Button({ ID = "CreatePlayers", Text = tr("action.create"), MinimumSize = { 0, 40 }, Weight = 0, StyleSheet = App.widget_styles.primary }),
-                ui:HGroup({ Weight = 0 }, {
-                    ui:Button({ ID = "CancelRun", Text = tr("action.cancel"), Enabled = false, Weight = 0 }),
-                    ui:HGap(0, 1),
-                    ui:Button({ ID = "RemovePlayers", Text = tr("action.remove_players"), MinimumSize = { 230, 26 }, Weight = 0 }),
-                }),
-                ui:Label({ ID = "ProgressBar", Text = "", MinimumSize = { 0, 6 }, MaximumSize = { 16777215, 6 }, Weight = 0 }),
-                ui:Label({ ID = "ProgressStatus", Text = tr("status.ready"), WordWrap = true, Weight = 0 }),
-                ui:Label({ ID = "LastError", Text = "", Hidden = true, WordWrap = true, Font = fonts.hint, Weight = 0, StyleSheet = App.widget_styles.error }),
-                ui:VGap(0, 1),
+    return ui:HGroup({ ID = "PageStyle", Hidden = true, Weight = 1, Spacing = 20 }, {
+        ui:VGroup({ Weight = 1, Spacing = 8 }, {
+            ui:HGroup({ Weight = 0, Spacing = 8 }, {
+                ui:Label({ ID = "StyleTitle", Text = "", Font = fonts.section, Weight = 1, StyleSheet = App.widget_styles.section }),
+                ui:Button({ ID = "ResetStyle", Text = tr("action.reset_style"), Weight = 0, StyleSheet = App.widget_styles.quiet }),
             }),
-            App.preview_panel("Create", fonts),
+            ui:TabBar({ ID = "StyleTabs", Weight = 0 }),
+            ui:VGroup({ ID = "StyleLayout", Weight = 1, Spacing = 7 }, layout_children),
+            ui:VGroup({ ID = "StyleColors", Hidden = true, Weight = 1, Spacing = 7 }, color_rows),
+            ui:VGroup({ ID = "StyleText", Hidden = true, Weight = 1, Spacing = 7 }, text_children),
         }),
+        App.preview_panel("Style", fonts, App.PREVIEW_CLOSE),
+    })
+end
 
-        ui:HGroup({ ID = "PageStyle", Hidden = true, Weight = 1, Spacing = 16 }, {
-            ui:VGroup({ Weight = 1, Spacing = 6 }, {
-                App.row(tr("field.skin"), { ui:ComboBox({ ID = "SkinSelector", MinimumSize = { 220, 26 }, Weight = 0 }) }, 110),
-                App.row(tr("field.palette"), { ui:ComboBox({ ID = "PaletteSelector", MinimumSize = { 220, 26 }, Weight = 0 }), ui:Button({ ID = "ApplyPalette", Text = tr("action.apply"), Weight = 0 }) }, 110),
-                ui:TabBar({ ID = "StyleTabs", Weight = 0 }),
-                ui:VGroup({ ID = "StyleLayout", Weight = 1, Spacing = 5 }, layout_children),
-                ui:VGroup({ ID = "StyleColors", Hidden = true, Weight = 1, Spacing = 5 }, color_rows),
-                ui:VGroup({ ID = "StyleText", Hidden = true, Weight = 1, Spacing = 5 }, text_children),
-                ui:HGroup({ Weight = 0 }, { ui:Button({ ID = "ResetStyle", Text = tr("action.reset_style"), Weight = 0 }), ui:HGap(0, 1) }),
-            }),
-            App.preview_panel("Style", fonts),
+function App.build_library_page(fonts)
+    return ui:VGroup({ ID = "PagePresets", Hidden = true, Weight = 1, Spacing = 8 }, {
+        App.section(tr("presets.title"), fonts),
+        App.hint(tr("presets.hint"), fonts),
+        App.row(tr("field.preset_name"), {
+            ui:LineEdit({ ID = "PresetName", MinimumSize = { 280, 28 }, Weight = 0 }),
+            ui:Button({ ID = "PresetSave", Text = tr("action.preset_save"), Weight = 0, StyleSheet = App.widget_styles.accent }),
+            ui:Button({ ID = "PresetRename", Text = tr("action.preset_rename"), Weight = 0 }),
         }),
-
-        ui:VGroup({ ID = "PagePresets", Hidden = true, Weight = 1, Spacing = 6 }, {
-            ui:Label({ Text = tr("presets.title"), Font = fonts.section, Weight = 0 }),
-            ui:Label({ Text = tr("presets.hint"), Font = fonts.hint, WordWrap = true, Weight = 0 }),
-            App.row(tr("field.preset_list"), {
-                ui:ComboBox({ ID = "PresetList", MinimumSize = { 300, 26 }, Weight = 0 }),
-                ui:Button({ ID = "PresetApply", Text = tr("action.preset_apply"), Weight = 0 }),
-                ui:Button({ ID = "PresetDelete", Text = tr("action.preset_delete"), Weight = 0 }),
-            }, 170),
-            App.row(tr("field.preset_name"), {
-                ui:LineEdit({ ID = "PresetName", MinimumSize = { 300, 26 }, Weight = 0 }),
-                ui:Button({ ID = "PresetSave", Text = tr("action.preset_save"), Weight = 0 }),
-                ui:Button({ ID = "PresetRename", Text = tr("action.preset_rename"), Weight = 0 }),
-            }, 170),
-            App.row("", {
-                ui:Button({ ID = "PresetExport", Text = tr("action.preset_export"), Weight = 0 }),
-                ui:Button({ ID = "PresetImport", Text = tr("action.preset_import"), Weight = 0 }),
-                ui:Button({ ID = "PresetFolder", Text = tr("action.open_presets_folder"), Weight = 0 }),
-            }, 170),
-            ui:VGap(12, 0),
-            ui:Label({ Text = tr("palettes.title"), Font = fonts.section, Weight = 0 }),
-            ui:Label({ Text = tr("palettes.hint"), Font = fonts.hint, WordWrap = true, Weight = 0 }),
-            App.row(tr("field.palette"), {
-                ui:ComboBox({ ID = "PaletteLibrary", MinimumSize = { 300, 26 }, Weight = 0 }),
-                ui:Button({ ID = "PaletteLibraryApply", Text = tr("action.apply"), Weight = 0 }),
-                ui:Button({ ID = "PaletteDelete", Text = tr("action.palette_delete"), Weight = 0 }),
-            }, 170),
-            App.row(tr("field.palette_name"), {
-                ui:LineEdit({ ID = "PaletteName", MinimumSize = { 300, 26 }, Weight = 0 }),
-                ui:Button({ ID = "PaletteSave", Text = tr("action.palette_save"), Weight = 0 }),
-            }, 170),
-            ui:VGap(0, 1),
+        App.row(tr("field.preset_list"), {
+            ui:ComboBox({ ID = "PresetList", MinimumSize = { 280, 28 }, Weight = 0 }),
+            ui:Button({ ID = "PresetApply", Text = tr("action.preset_apply"), Weight = 0 }),
+            ui:Button({ ID = "PresetDelete", Text = tr("action.preset_delete"), Weight = 0, StyleSheet = App.widget_styles.quiet }),
         }),
+        App.row("", {
+            ui:Button({ ID = "PresetExport", Text = tr("action.preset_export"), Weight = 0 }),
+            ui:Button({ ID = "PresetImport", Text = tr("action.preset_import"), Weight = 0 }),
+            ui:Button({ ID = "PresetFolder", Text = tr("action.open_presets_folder"), Flat = true, Weight = 0, StyleSheet = App.widget_styles.link }),
+        }),
+        ui:VGap(8, 0),
+        App.divider(),
+        ui:VGap(8, 0),
+        App.section(tr("palettes.title"), fonts),
+        App.hint(tr("palettes.hint"), fonts),
+        App.row(tr("field.palette_name"), {
+            ui:LineEdit({ ID = "PaletteName", MinimumSize = { 280, 28 }, Weight = 0 }),
+            ui:Button({ ID = "PaletteSave", Text = tr("action.palette_save"), Weight = 0, StyleSheet = App.widget_styles.accent }),
+        }),
+        App.row(tr("field.preset_list"), {
+            ui:ComboBox({ ID = "PaletteLibrary", MinimumSize = { 280, 28 }, Weight = 0 }),
+            ui:Button({ ID = "PaletteLibraryApply", Text = tr("action.apply"), Weight = 0 }),
+            ui:Button({ ID = "PaletteDelete", Text = tr("action.palette_delete"), Weight = 0, StyleSheet = App.widget_styles.quiet }),
+        }),
+        ui:VGap(0, 1),
+    })
+end
 
-        ui:VGroup({ ID = "PageLog", Hidden = true, Weight = 1, Spacing = 6 }, {
-            ui:Label({ Text = tr("diagnostics.title"), Font = fonts.section, Weight = 0 }),
-            ui:Label({ Text = tr("diagnostics.paths", { log = log_path(), dump = clip_dump_path(), error = path_join(install_root(), "last_error.txt") }), Font = fonts.hint, WordWrap = true, Weight = 0 }),
-            ui:HGroup({ Weight = 0 }, {
-                ui:Button({ ID = "CopyLog", Text = tr("action.copy_log"), Weight = 0 }),
-                ui:Button({ ID = "OpenLog", Text = tr("action.open_log"), Weight = 0 }),
-                ui:Button({ ID = "ClearLog", Text = tr("action.clear_log"), Weight = 0 }),
-                ui:HGap(0, 1),
-                ui:Label({ Text = tr("field.language"), Weight = 0 }),
-                ui:ComboBox({ ID = "LanguageMode", MinimumSize = { 180, 26 }, Weight = 0 }),
-            }),
-            ui:Label({ ID = "LanguageRestartHint", Text = tr("language.restart_hint"), Font = fonts.hint, WordWrap = true, Weight = 0 }),
-            ui:TextEdit({ ID = "Log", ReadOnly = true, Font = fonts.mono, Weight = 1 }),
-            ui:HGroup({ Weight = 0 }, {
-                ui:Button({ ID = "CleanupLegacy", Text = tr("action.cleanup_legacy"), Weight = 0 }),
-                ui:Label({ Text = tr("hint.cleanup_legacy"), Font = fonts.hint, WordWrap = true, Weight = 1 }),
-            }),
+function App.build_service_page(fonts)
+    return ui:VGroup({ ID = "PageLog", Hidden = true, Weight = 1, Spacing = 8 }, {
+        App.section(tr("section.interface"), fonts),
+        App.row(tr("field.language"), {
+            ui:ComboBox({ ID = "LanguageMode", MinimumSize = { 200, 28 }, Weight = 0 }),
+        }),
+        App.hint(tr("language.restart_hint"), fonts, "LanguageRestartHint"),
+        ui:VGap(6, 0),
+        ui:HGroup({ Weight = 0, Spacing = 8 }, {
+            App.section(tr("diagnostics.title"), fonts),
+            ui:HGap(0, 1),
+            ui:Button({ ID = "CopyLog", Text = tr("action.copy_log"), Weight = 0 }),
+            ui:Button({ ID = "OpenLog", Text = tr("action.open_log"), Weight = 0 }),
+            ui:Button({ ID = "ClearLog", Text = tr("action.clear_log"), Weight = 0, StyleSheet = App.widget_styles.quiet }),
+        }),
+        ui:TextEdit({ ID = "Log", ReadOnly = true, Font = fonts.mono, Weight = 1 }),
+        App.hint(tr("diagnostics.paths", { log = log_path(), dump = clip_dump_path(), error = path_join(install_root(), "last_error.txt") }), fonts),
+        ui:HGroup({ Weight = 0, Spacing = 8 }, {
+            ui:Button({ ID = "CleanupLegacy", Text = tr("action.cleanup_legacy"), Weight = 0, ToolTip = tr("hint.cleanup_legacy"), StyleSheet = App.widget_styles.quiet }),
+            ui:HGap(0, 1),
         }),
     })
 end
 
+function App.build(fonts)
+    return ui:VGroup({ Spacing = 10 }, {
+        ui:HGroup({ Weight = 0, Spacing = 12 }, {
+            ui:Label({ Text = tr("window.title"), Font = fonts.header, Weight = 0 }),
+            ui:Label({ Text = tr("app.subtitle"), Font = fonts.hint, Weight = 1, StyleSheet = App.widget_styles.muted }),
+        }),
+        ui:TabBar({ ID = "MainTabs", Weight = 0 }),
+        ui:VGap(2, 0),
+        App.build_create_page(fonts),
+        App.build_style_page(fonts),
+        App.build_library_page(fonts),
+        App.build_service_page(fonts),
+    })
+end
+
+App.PREVIEW_MAIN = { 480, 270 }
+App.PREVIEW_CLOSE = { 400, 225 }
+
 -- UIManager does not expose element IDs as Qt object names, so per-widget styles are set directly.
 App.widget_styles = {
-    primary = "QPushButton { min-height: 38px; background: #2f5fb3; border: 1px solid #4677cf; border-radius: 4px; color: #ffffff; font-weight: 600; font-size: 14px; }"
-        .. " QPushButton:hover { background: #386bc4; } QPushButton:disabled { background: #2a3447; border-color: #2f3a4f; color: #8c95a3; }",
-    preview = "QPushButton { min-width: 412px; max-width: 412px; min-height: 237px; max-height: 237px; padding: 0;"
-        .. " background: #121317; border: 1px solid #2c2f35; border-radius: 4px; }",
-    error = "QLabel { padding: 6px 8px; background: #33201f; color: #f2a39d; border: 1px solid #6e3c39; border-radius: 3px; }",
+    primary = "QPushButton { min-height: 42px; background: #3b6fd8; border: none; border-radius: 8px; color: #ffffff; font-weight: 600; font-size: 14px; }"
+        .. " QPushButton:hover { background: #4a7de6; } QPushButton:pressed { background: #335fba; }"
+        .. " QPushButton:disabled { background: #2a3142; color: #7d8696; }",
+    accent = "QPushButton { background: #2d3a55; border: 1px solid #3f5585; color: #e3e9f7; }"
+        .. " QPushButton:hover { background: #34446a; } QPushButton:disabled { background: #24262c; border-color: #2e3138; color: #62666e; }",
+    quiet = "QPushButton { background: transparent; border: 1px solid #34373e; color: #a9aeb7; }"
+        .. " QPushButton:hover { border-color: #565b64; color: #e3e5e8; } QPushButton:disabled { color: #5d6168; border-color: #2a2c31; }",
+    link = "QPushButton { background: transparent; border: none; padding: 2px 0; color: #7fa6ff; text-align: left; }"
+        .. " QPushButton:hover { color: #b3c9ff; } QPushButton:disabled { color: #5d6168; }",
+    section = "QLabel { color: #eef0f3; }",
+    muted = "QLabel { color: #8b9099; }",
+    divider = "QLabel { background: #2c2f36; border: none; }",
+    error = "QLabel { padding: 8px 10px; background: #3a2222; color: #f3aaa4; border: 1px solid #6e3c39; border-radius: 6px; }",
+    preview = function(width, height)
+        return string.format("QPushButton { min-width: %dpx; max-width: %dpx; min-height: %dpx; max-height: %dpx; padding: 0;"
+            .. " background: #111216; border: 1px solid #2c2f36; border-radius: 8px; }"
+            .. " QPushButton:hover { border-color: #4a4f59; }", width, width, height, height)
+    end,
 }
 
 App.stylesheet = [[
-QWidget { background: #1f2024; color: #d9dbdf; font-family: "Segoe UI"; }
+QWidget { background: #1b1c20; color: #d9dbdf; font-family: "Segoe UI"; font-size: 13px; }
 QLabel { background: transparent; }
-QTabBar::tab { min-width: 110px; min-height: 26px; padding: 4px 14px; background: #24262b; color: #9aa0a8; border: 1px solid #383b42; border-bottom: 2px solid #24262b; }
+QToolTip { background: #2a2c32; color: #e6e8eb; border: 1px solid #3d4048; padding: 6px; }
+QTabBar { background: transparent; }
+QTabBar::tab { min-width: 96px; min-height: 30px; padding: 4px 18px; background: transparent; color: #8b9099; border: none; border-bottom: 2px solid #2a2c32; }
 QTabBar::tab:hover { color: #d9dbdf; }
-QTabBar::tab:selected { background: #1f2024; color: #f2f3f5; border-bottom: 2px solid #5b8def; }
-QLineEdit, QComboBox, QSpinBox { min-height: 24px; padding: 1px 6px; background: #15161a; color: #d9dbdf; border: 1px solid #383b42; border-radius: 3px; selection-background-color: #3e5c8a; }
+QTabBar::tab:selected { color: #f4f5f7; border-bottom: 2px solid #5b8def; }
+QLineEdit, QComboBox, QSpinBox { min-height: 26px; padding: 1px 8px; background: #141519; color: #e1e3e6; border: 1px solid #33363d; border-radius: 6px; selection-background-color: #3e5c8a; }
+QLineEdit:hover, QComboBox:hover, QSpinBox:hover { border-color: #464a53; }
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border-color: #5b8def; }
-QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QCheckBox:disabled { color: #5d6168; }
-QPushButton { min-height: 24px; padding: 2px 12px; border: 1px solid #383b42; border-radius: 3px; background: #2a2c31; color: #d9dbdf; }
-QPushButton:hover { border-color: #565b64; background: #30333a; }
-QPushButton:disabled { color: #62666e; background: #23252a; }
-QCheckBox { spacing: 6px; background: transparent; }
-QTextEdit { background: #15161a; color: #c5c8cd; border: 1px solid #383b42; border-radius: 3px; }
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled { color: #5d6168; border-color: #2a2c31; }
+QComboBox QAbstractItemView { background: #1f2025; color: #e1e3e6; border: 1px solid #3d4048; selection-background-color: #34446a; outline: none; }
+QPushButton { min-height: 26px; padding: 2px 14px; border: 1px solid #3a3d45; border-radius: 6px; background: #26282e; color: #e1e3e6; }
+QPushButton:hover { border-color: #565b64; background: #2d3037; }
+QPushButton:disabled { color: #62666e; background: #212328; border-color: #2a2c31; }
+QCheckBox { spacing: 8px; background: transparent; color: #d9dbdf; }
+QCheckBox:disabled { color: #5d6168; }
+QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #4a4e57; background: #141519; }
+QCheckBox::indicator:hover { border-color: #7a808b; }
+QCheckBox::indicator:checked { background: #5b8def; border-color: #5b8def; }
+QCheckBox::indicator:disabled { background: #202126; border-color: #2c2e34; }
+QTextEdit { background: #141519; color: #c5c8cd; border: 1px solid #2c2f36; border-radius: 6px; padding: 4px; }
 ]]
 
 function App.bind_events()
@@ -4866,6 +4995,8 @@ function App.bind_events()
     win.On.CancelRun.Clicked = function(ev) Pipeline.cancel() end
     win.On.RemovePlayers.Clicked = function(ev) HANDLERS.on_remove_players() end
     win.On.ListClips.Clicked = function(ev) HANDLERS.on_list_clips() end
+    win.On.OpenStyle.Clicked = function(ev) App.go_to_page(1) end
+    win.On.SaveAsPreset.Clicked = function(ev) App.go_to_page(2) end
     win.On.SkinSelector.CurrentIndexChanged = function(ev)
         if Editor.suppress then return end
         HANDLERS.guard(function()
@@ -4873,12 +5004,28 @@ function App.bind_events()
             local skin = SKIN_CATALOG.skins[Editor.combo_index("SkinSelector") + 1]
             if skin and skin ~= Settings.data.active_skin then
                 Editor.select_skin(skin)
+                Editor.reset_quick_preset()
                 append_log(tr("log.skin_active", { skin = Style.skin_label(skin) }))
             end
         end)
     end
-    win.On.ApplyPalette.Clicked = function(ev)
-        HANDLERS.guard(function() Editor.apply_palette(Editor.palette_names()[Editor.combo_index("PaletteSelector") + 1]) end)
+    win.On.PaletteSelector.CurrentIndexChanged = function(ev)
+        if Editor.suppress then return end
+        HANDLERS.guard(function()
+            local name = Editor.palette_names()[Editor.combo_index("PaletteSelector") + 1]
+            local current = Editor.detect_palette(Settings.data.styles[Settings.data.active_skin])
+            if name and name ~= "Custom" and name ~= current then
+                Editor.apply_palette(name)
+                Editor.reset_quick_preset()
+            end
+        end)
+    end
+    win.On.QuickPreset.CurrentIndexChanged = function(ev)
+        if Editor.suppress then return end
+        HANDLERS.guard(function()
+            local preset = Settings.data.presets[Editor.combo_index("QuickPreset")]
+            if preset and preset.name ~= Editor.active_preset then Presets.apply(preset) end
+        end)
     end
     win.On.PaletteLibraryApply.Clicked = function(ev)
         HANDLERS.guard(function() Editor.apply_palette(Presets.library_selected()) end)
@@ -4895,6 +5042,7 @@ function App.bind_events()
         HANDLERS.guard(function() run_runner_config({ mode = "open", path = Presets.folder() }, "open") end)
     end
     win.On.PresetList.CurrentIndexChanged = function(ev)
+        if Editor.suppress then return end
         local preset = Presets.selected()
         if preset then set_text("PresetName", preset.name) end
     end
@@ -4907,8 +5055,6 @@ function App.bind_events()
     win.On.CleanupLegacy.Clicked = function(ev) HANDLERS.on_cleanup_legacy() end
     win.On.LanguageMode.CurrentIndexChanged = function(ev) HANDLERS.on_language_changed() end
     for _, suffix in ipairs({ "Create", "Style" }) do
-        win.On["RefreshPreview" .. suffix].Clicked = function(ev) Preview.request(0) end
-        win.On["OpenPreview" .. suffix].Clicked = function(ev) HANDLERS.on_open_preview() end
         win.On["Preview" .. suffix].Clicked = function(ev) HANDLERS.on_open_preview() end
     end
     for _, color in ipairs(Editor.colors) do
@@ -5004,15 +5150,15 @@ function App.run()
         mono = ui:Font({ Family = "Consolas", PointSize = 9 }),
     }
     App.busy_controls = {
-        "CreatePlayers", "RemovePlayers", "ListClips", "SkinSelector", "PaletteSelector", "ApplyPalette",
+        "CreatePlayers", "RemovePlayers", "ListClips", "SkinSelector", "PaletteSelector",
         "QuickPreset", "PresetApply", "PaletteLibraryApply", "ResetStyle", "CleanupLegacy", "AudioTracks",
         "VideoTrack", "UpdateScope", "SwitchMode",
     }
     win = dispatcher:AddWindow({
         ID = PLUGIN_ID,
         WindowTitle = tr("window.title"),
-        Geometry = { 120, 60, 1060, 720 },
-        MinimumSize = { 900, 620 },
+        Geometry = { 120, 60, 1100, 700 },
+        MinimumSize = { 980, 620 },
         StyleSheet = App.stylesheet,
     }, App.build(fonts))
     -- A unique timer ID per launch keeps a previous window's timer from reaching this one.
@@ -5035,7 +5181,7 @@ function App.run()
         local ok, err = pcall(function() dispatcher:RunLoop() end)
         if ok then break end
         stray_events = stray_events + 1
-        pcall(function() append_file(log_path(), os.date("%H:%M:%S ") .. "UI dispatch: " .. tostring(err) .. "\n") end)
+        pcall(function() append_file(path_join(tmp_dir(), "ui_dispatch.txt"), os.date("%H:%M:%S ") .. tostring(err) .. "\n") end)
         if stray_events >= 20 then error(err) end
     end
     if Ticker.timer then pcall(function() Ticker.timer:Stop() end) end
