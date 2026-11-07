@@ -1651,6 +1651,65 @@ class InstallerOperationTests(unittest.TestCase):
         self.assertEqual(self._run("--uninstall"), 0)
         self.assertTrue(legacy.is_file())
 
+    def _pre_manifest_install(self, script_root: Path | None = None) -> Path:
+        """Lay out what preview builds before 0.1.0 installed: runtime files and a rendered Lua
+        script, with no manifest or install state."""
+        self.install_root.mkdir(parents=True)
+        for name in installer.PRE_MANIFEST_ROOT_FILE_NAMES:
+            (self.install_root / name).write_bytes(b"old preview build")
+        (self.install_root / "settings.json").write_text("keep me\n", encoding="utf-8")
+        root = script_root or self.install_root
+        self.script_directory.mkdir(parents=True)
+        script = self.script_directory / installer.PLUGIN_SCRIPT_NAME
+        script.write_text(
+            "-- Track Visualizer preview build\n"
+            f"local INSTALL_ROOT = [[{root}]]\n"
+            f"local ENGINE_EXECUTABLE = [[{root / installer.ENGINE_NAME}]]\n"
+            f"local RUNNER_EXECUTABLE = [[{root / installer.RUNNER_NAME}]]\n"
+            f"local FFMPEG_EXECUTABLE = [[{root / installer.FFMPEG_NAME}]]\n"
+            f"local FFPROBE_EXECUTABLE = [[{root / installer.FFPROBE_NAME}]]\n",
+            encoding="utf-8",
+        )
+        return script
+
+    def test_pre_manifest_preview_install_is_upgraded_in_place(self) -> None:
+        script = self._pre_manifest_install()
+
+        self.assertEqual(self._run("--dry-run"), 0)
+        self.assertEqual((self.install_root / installer.ENGINE_NAME).read_bytes(), b"old preview build")
+
+        self.assertEqual(self._run(), 0)
+        self.assertEqual((self.install_root / installer.ENGINE_NAME).read_bytes(), b"packaged")
+        self.assertEqual((self.install_root / installer.FFMPEG_NAME).read_bytes(), b"packaged")
+        self.assertIn("-- v1", script.read_text(encoding="utf-8"))
+        self.assertTrue((self.install_root / installer.MANIFEST_NAME).is_file())
+        self.assertTrue((self.install_root / installer.INSTALL_STATE_NAME).is_file())
+        self.assertEqual(
+            (self.install_root / "settings.json").read_text(encoding="utf-8"), "keep me\n"
+        )
+        # The upgraded install is now owned, so a later upgrade and uninstall work normally.
+        self._rewrite_payload("v2")
+        self.assertEqual(self._run(), 0)
+        self.assertEqual(self._run("--uninstall"), 0)
+        self.assertFalse(script.exists())
+        self.assertTrue((self.install_root / "settings.json").is_file())
+
+    def test_pre_manifest_runtime_without_matching_script_stays_fail_closed(self) -> None:
+        script = self._pre_manifest_install(self.root / "another-root")
+        with self.assertRaisesRegex(RuntimeError, "without a valid owned"):
+            self._run()
+        script.unlink()
+        with self.assertRaisesRegex(RuntimeError, "without a valid owned"):
+            self._run()
+        self.assertEqual((self.install_root / installer.ENGINE_NAME).read_bytes(), b"old preview build")
+
+    def test_pre_manifest_upgrade_requires_only_files_preview_builds_wrote(self) -> None:
+        self._pre_manifest_install()
+        (self.install_root / installer.NOTICE_NAME).write_text("notices\n", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "without a valid owned"):
+            self._run()
+        self.assertEqual((self.install_root / installer.ENGINE_NAME).read_bytes(), b"old preview build")
+
     def test_owned_legacy_only_install_is_removed_by_uninstall(self) -> None:
         self.script_directory.mkdir()
         legacy = self.script_directory / installer.LEGACY_PLUGIN_SCRIPT_NAME

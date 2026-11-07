@@ -951,6 +951,41 @@ def _installed_installation(
     return manifest, install_state
 
 
+PRE_MANIFEST_ROOT_FILE_NAMES = (
+    ENGINE_NAME,
+    RUNNER_NAME,
+    FFMPEG_NAME,
+    FFPROBE_NAME,
+    LOGO_NAME,
+)
+
+
+def _pre_manifest_installation(target_root: Path, script_dir: Path) -> bool:
+    """Whether ``target_root`` holds a build that predates the install manifest.
+
+    Preview builds before 0.1.0 copied the runtime and the Resolve script without writing a
+    manifest or install state. Such an install is replaced (transactionally, with rollback) only
+    when nothing but the files those builds wrote is present and a Resolve script in
+    ``script_dir`` points at exactly this root's runtime. Anything else stays fail-closed.
+    """
+    _assert_safe_directory(target_root)
+    _assert_safe_directory(script_dir)
+    owned_markers = (MANIFEST_NAME, INSTALL_STATE_NAME, NOTICE_NAME, "LICENSE")
+    for name in owned_markers:
+        _assert_safe_file(target_root / name)
+        if _path_exists(target_root / name):
+            return False
+    runtime = [target_root / name for name in PRE_MANIFEST_ROOT_FILE_NAMES]
+    for path in runtime:
+        _assert_safe_file(path)
+    if not any(_path_exists(path) for path in runtime):
+        return False
+    return any(
+        _legacy_script_targets_root(script_dir / name, target_root)
+        for name in (PLUGIN_SCRIPT_NAME, LEGACY_PLUGIN_SCRIPT_NAME)
+    )
+
+
 def _installed_script_health(
     install_state: ValidatedInstallState,
 ) -> str:
@@ -1003,7 +1038,8 @@ def build_install_plan(
         language=language,
         captured_payloads=captured_payloads,
     )
-    installed = _installed_installation(target_root)
+    pre_manifest = _pre_manifest_installation(target_root, script_dir)
+    installed = None if pre_manifest else _installed_installation(target_root)
     old_manifest = installed[0] if installed is not None else None
     old_state = installed[1] if installed is not None else None
     old_script_health = (
@@ -1042,7 +1078,9 @@ def build_install_plan(
         else:
             owned_identity = None
         if record.packaged_path == script_packaged_path and _path_exists(target):
-            if (
+            if pre_manifest and _legacy_script_targets_root(target, target_root):
+                pass
+            elif (
                 old_state is None
                 or _path_key(target) != _path_key(old_state.script_path)
                 or old_script_health != "owned"

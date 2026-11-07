@@ -18,6 +18,7 @@ All notable changes are documented here. This project follows [Keep a Changelog]
 - Private Windows x64 release-candidate packaging and a separate unpublished Linux x64 canary.
 - Reproducible minimal FFmpeg source builds with checksums and SBOMs.
 - Localized non-destructive uninstall support and atomic runtime upgrades.
+- The installer upgrades preview builds that were installed before the install manifest existed, when the runtime files and the Resolve script clearly belong to that install root; settings, logs and outputs are kept. Previously it stopped with "Managed-looking files exist without a valid owned installed manifest".
 - Consistent Windows product and version metadata for first-party executables.
 
 ### Changed
