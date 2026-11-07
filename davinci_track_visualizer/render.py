@@ -1,410 +1,146 @@
+"""Player card rendering.
+
+A player is split into layers so Resolve only has to animate cheap things:
+
+* ``card``   – everything static: shadow, panel, glass, cover, titles, brand, the unplayed
+  progress track and waveform bars.
+* ``played`` – the played look of the progress area (accent line/bars). Fusion reveals it from
+  left to right with a rectangle mask.
+* ``knob``   – the progress handle at the start position. Fusion moves it horizontally.
+* time readouts – :class:`~davinci_track_visualizer.fusion_comp.TextSpec` entries drawn by
+  Fusion TextPlus nodes (and by Pillow for previews).
+
+Every layer is a full-frame RGBA image at timeline resolution with the player already at its
+final position, so the Fusion composition needs no transforms besides the knob offset.
+"""
+
 from __future__ import annotations
 
 import math
 import os
 import sys
-import subprocess
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
-from .metadata import TrackMetadata, safe_stem
+from .fusion_comp import TextSpec, format_clock
+from .skins import (
+    SKIN_BASE_SIZES,
+    SUPPORTED_SKINS,
+    check_skin,
+    default_design,
+    effective_flags,
+    normalize_design,
+)
+
+RENDERER_REVISION = 3
+FontType = ImageFont.FreeTypeFont | ImageFont.ImageFont
+
+__all__ = [
+    "RENDERER_REVISION",
+    "SUPPORTED_SKINS",
+    "PlayerLayers",
+    "TrackInfo",
+    "compose_player",
+    "default_design",
+    "player_bounds",
+    "render_preview",
+    "render_track_layers",
+    "sample_levels",
+]
 
 
-LIVE_DYNAMIC_SCHEMA = "davinci_track_visualizer.live_dynamic"
-LIVE_DYNAMIC_SCHEMA_VERSION = 3
-STATIC_RENDERER_REVISION = 2
-SUPPORTED_SKINS = ("classic", "minimal", "portrait_glass")
-STATIC_SKIN_REVISIONS = {
-    "classic": 1,
-    "minimal": 1,
-    "portrait_glass": 1,
-}
-
-
-def _creationflags() -> int:
-    if sys.platform.startswith("win"):
-        return getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    return 0
-
-
-def default_design(skin: str = "classic") -> dict[str, Any]:
-    design = {
-        "brand_text": "aplus.fm",
-        "show_cover": True,
-        "show_brand": True,
-        "show_time": True,
-        "show_progress": True,
-        "show_knob": True,
-        "glass_enabled": True,
-        "panel_color": "#121619",
-        "panel_alpha": 154,
-        "border_color": "#FFFFFF",
-        "border_alpha": 82,
-        "primary_text_color": "#F5F7F8",
-        "secondary_text_color": "#EEF3F5",
-        "accent_color": "#EBEEF0",
-        "track_color": "#EBEEF0",
-        "corner_radius": 14,
-        "glass_strength": 46,
-        "title_size": 32,
-        "artist_size": 18,
-        "meta_size": 16,
-        "title_font_family": "Segoe UI",
-        "artist_font_family": "Segoe UI",
-    }
-    if skin == "minimal":
-        design.update(
-            {
-                "panel_color": "#241704",
-                "panel_alpha": 224,
-                "border_color": "#F2A900",
-                "border_alpha": 255,
-                "primary_text_color": "#FFD84A",
-                "secondary_text_color": "#F2A900",
-                "corner_radius": 2,
-                "title_size": 32,
-                "artist_size": 16,
-                "meta_size": 28,
-                "title_font_family": "Impact",
-                "artist_font_family": "Courier New",
-            }
-        )
-    elif skin == "portrait_glass":
-        design.update(
-            {
-                "panel_color": "#171125",
-                "panel_alpha": 164,
-                "border_color": "#C4B5FD",
-                "border_alpha": 92,
-                "primary_text_color": "#FFF8ED",
-                "secondary_text_color": "#D8CCF2",
-                "accent_color": "#A78BFA",
-                "track_color": "#D8CCF2",
-                "corner_radius": 24,
-                "glass_strength": 70,
-                "title_size": 30,
-                "artist_size": 17,
-                "meta_size": 15,
-            }
-        )
-    return design
-
-
-@dataclass
-class RenderSettings:
-    width: int = 640
-    height: int = 160
-    fps: int = 30
-    bars: int = 56
-    codec: str = "qtrle"
-    design: dict[str, Any] = field(default_factory=default_design)
-    player_width: int | None = None
-    player_height: int | None = None
-    margin: int = 48
-    bake_position: bool = False
-    skin: str = "classic"
-
-    def __post_init__(self) -> None:
-        if self.skin not in SUPPORTED_SKINS:
-            raise ValueError(f"Unsupported skin {self.skin!r}; expected one of {', '.join(SUPPORTED_SKINS)}")
-
-
-@dataclass
-class RenderedTrack:
-    source_path: str
-    overlay_path: str
+@dataclass(frozen=True)
+class TrackInfo:
     title: str
     artist: str
-    album: str
-    duration: float
-    cover_path: str | None
-    frame_count: int
-    job_id: str | None = None
-    record_frame: int | None = None
-    source_start_time: float | None = None
-    timeline_item_name: str | None = None
-
-    def to_dict(self) -> dict:
-        return asdict(self)
+    cover_path: str | None = None
 
 
-def format_mmss(seconds: float) -> str:
-    seconds = max(0, int(seconds))
-    return f"{seconds // 60:02d}:{seconds % 60:02d}"
+@dataclass
+class PlayerLayers:
+    card: Image.Image
+    played: Image.Image | None
+    knob: Image.Image | None
+    progress_x1: float
+    progress_x2: float
+    texts: list[TextSpec] = field(default_factory=list)
+    bounds: tuple[int, int, int, int] = (0, 0, 0, 0)
 
 
-def _merged_design(settings: RenderSettings) -> dict[str, Any]:
-    design = default_design(settings.skin)
-    if settings.design:
-        design.update(settings.design)
-    return design
-
-
-def _effective_design(settings: RenderSettings) -> dict[str, Any]:
-    design = _merged_design(settings)
-    if settings.skin == "minimal":
-        design.update(
-            {
-                "show_cover": False,
-                "show_brand": False,
-                "show_time": True,
-                "show_progress": False,
-                "show_knob": False,
-                "glass_enabled": False,
-            }
-        )
-    elif settings.skin == "portrait_glass":
-        design.update(
-            {
-                "show_cover": True,
-                "show_brand": False,
-                "show_time": True,
-                "show_progress": True,
-                "show_knob": False,
-                "glass_enabled": True,
-            }
-        )
-    return design
-
-
-def static_renderer_revision(skin: str) -> dict[str, int]:
-    if skin not in STATIC_SKIN_REVISIONS:
-        raise ValueError(f"Unsupported skin {skin!r}")
-    return {
-        "renderer": STATIC_RENDERER_REVISION,
-        "skin": STATIC_SKIN_REVISIONS[skin],
-    }
-
-
-def _bool(value: Any) -> bool:
-    if isinstance(value, str):
-        return value.strip().lower() not in ("0", "false", "no", "off", "")
-    return bool(value)
-
-
-def _int(value: Any, default: int, minimum: int, maximum: int) -> int:
-    try:
-        parsed = int(float(str(value).strip()))
-    except Exception:
-        parsed = default
-    return max(minimum, min(maximum, parsed))
+# --------------------------------------------------------------------------------------------
+# Small helpers
 
 
 def _hex_to_rgb(value: Any, fallback: str = "#FFFFFF") -> tuple[int, int, int]:
-    text = str(value or fallback).strip()
-    if not text.startswith("#"):
-        text = "#" + text
-    if len(text) == 4:
-        text = "#" + "".join(char * 2 for char in text[1:])
-    if len(text) != 7:
-        text = fallback
+    text = str(value or fallback).strip().lstrip("#")
+    if len(text) == 3:
+        text = "".join(char * 2 for char in text)
     try:
-        return int(text[1:3], 16), int(text[3:5], 16), int(text[5:7], 16)
-    except Exception:
+        return int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
+    except (ValueError, IndexError):
         return _hex_to_rgb(fallback, "#FFFFFF")
 
 
-def _rgba(color: Any, alpha: Any, fallback: str = "#FFFFFF") -> tuple[int, int, int, int]:
-    r, g, b = _hex_to_rgb(color, fallback)
-    return r, g, b, _int(alpha, 255, 0, 255)
+def _rgba(color: Any, alpha: float) -> tuple[int, int, int, int]:
+    red, green, blue = _hex_to_rgb(color)
+    return red, green, blue, max(0, min(255, int(round(alpha))))
 
 
-def _masked_alpha(image: Image.Image, mask: Image.Image) -> Image.Image:
-    alpha = image.getchannel("A")
-    image.putalpha(ImageChops.multiply(alpha, mask))
-    return image
+def _blank(width: int, height: int) -> Image.Image:
+    return Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
 
-def _classic_layout(settings: RenderSettings, design: dict[str, Any]) -> dict[str, Any]:
-    outer_w = settings.player_width if settings.bake_position and settings.player_width else settings.width
-    outer_h = settings.player_height if settings.bake_position and settings.player_height else settings.height
-    outer_x = settings.margin if settings.bake_position else 0
-    outer_y = settings.height - settings.margin - outer_h if settings.bake_position else 0
-    scale = outer_h / 160.0
-    pad = max(3, int(4 * scale))
-    card_x = outer_x + pad
-    card_y = outer_y + pad
-    card_w = outer_w - pad * 2
-    card_h = outer_h - pad * 2
-    show_cover = _bool(design.get("show_cover"))
-    if show_cover:
-        cover_size = max(72, int(card_h - 32 * scale))
-        cover_x = card_x + int(14 * scale)
-        cover_y = int((card_h - cover_size) / 2)
-        cover_y = card_y + cover_y
-        text_x = cover_x + cover_size + int(22 * scale)
-    else:
-        cover_size = 0
-        cover_x = 0
-        cover_y = 0
-        text_x = card_x + int(26 * scale)
-    text_right = card_x + card_w - int(24 * scale)
-    reserve_right = int(112 * scale) if _bool(design.get("show_time")) else int(12 * scale)
-    meta_size = _int(design.get("meta_size"), 12, 8, 30)
-    time_font_size = max(8, int(meta_size * scale))
-    time_box_w = max(1, int(112 * scale))
-    time_box_h = max(1, int(24 * scale))
-    time_box_x = text_right - time_box_w
-    time_box_y = card_y + int(98 * scale)
-    return {
-        "scale": scale,
-        "pad": pad,
-        "outer_x": outer_x,
-        "outer_y": outer_y,
-        "outer_w": outer_w,
-        "outer_h": outer_h,
-        "card_x": card_x,
-        "card_y": card_y,
-        "card_w": card_w,
-        "card_h": card_h,
-        "radius": max(4, int(_int(design.get("corner_radius"), 14, 0, 64) * scale)),
-        "show_cover": show_cover,
-        "cover_size": cover_size,
-        "cover_x": cover_x,
-        "cover_y": cover_y,
-        "text_x": text_x,
-        "text_right": text_right,
-        "max_text_w": max(120, text_right - text_x - reserve_right),
-        "line_y": card_y + card_h - int(20 * scale),
-        "time_box_x": time_box_x,
-        "time_box_y": time_box_y,
-        "time_box_w": time_box_w,
-        "time_box_h": time_box_h,
-        "time_font_size": time_font_size,
-        "progress_x1": text_x,
-        "progress_x2": text_right,
-        "progress_y": card_y + card_h - int(20 * scale),
-        "progress_line_width": max(1, int(2 * scale)),
-        "knob_radius": max(3, int(4 * scale)),
-    }
+def _rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, size[0] - 1, size[1] - 1), radius=max(0, radius), fill=255)
+    return mask
 
 
-def _minimal_layout(settings: RenderSettings, design: dict[str, Any]) -> dict[str, Any]:
-    outer_w = settings.player_width if settings.bake_position and settings.player_width else settings.width
-    outer_h = settings.player_height if settings.bake_position and settings.player_height else settings.height
-    outer_x = settings.margin if settings.bake_position else 0
-    outer_y = settings.height - settings.margin - outer_h if settings.bake_position else 0
-    scale = max(0.05, min(outer_w / 640.0, outer_h / 176.0))
-    gap = max(1, int(24 * scale))
-    timer_w = max(1, min(settings.width, int(352 * scale)))
-    timer_h = max(1, min(settings.height, int(84 * scale)))
-    # The timer is a separate frame-corner element, matching the reference layout.
-    timer_right = settings.width
-    timer_bottom = settings.height
-    timer_x = max(0, timer_right - timer_w)
-    timer_y = max(0, timer_bottom - timer_h)
-    card_w = max(1, min(outer_w, timer_x - gap - outer_x))
-    card_h = max(1, outer_h)
-    text_pad = max(1, min(card_w // 3, int(24 * scale)))
-    time_pad = max(1, min(timer_w // 3, int(20 * scale)))
-    return {
-        "scale": scale,
-        "pad": 0,
-        "outer_x": outer_x,
-        "outer_y": outer_y,
-        "outer_w": outer_w,
-        "outer_h": outer_h,
-        "card_x": outer_x,
-        "card_y": outer_y,
-        "card_w": card_w,
-        "card_h": card_h,
-        "radius": max(1, int(_int(design.get("corner_radius"), 14, 0, 64) * scale)),
-        "show_cover": False,
-        "cover_size": 0,
-        "cover_x": 0,
-        "cover_y": 0,
-        "text_x": outer_x + text_pad,
-        "text_right": outer_x + card_w - text_pad,
-        "max_text_w": max(1, card_w - text_pad * 2),
-        "line_y": max(0, timer_bottom - 1),
-        "timer_x": timer_x,
-        "timer_y": timer_y,
-        "timer_w": timer_w,
-        "timer_h": timer_h,
-        "time_box_x": timer_x + time_pad,
-        "time_box_y": timer_y,
-        "time_box_w": max(1, timer_w - time_pad * 2),
-        "time_box_h": timer_h,
-        "time_font_size": max(8, int(_int(design.get("meta_size"), 16, 8, 30) * scale)),
-        "progress_x1": timer_x,
-        "progress_x2": timer_x + timer_w,
-        "progress_y": max(0, timer_bottom - 1),
-        "progress_line_width": max(1, int(2 * scale)),
-        "knob_radius": max(1, int(4 * scale)),
-    }
+def sample_levels(count: int, seed: int = 7) -> list[float]:
+    """Deterministic, music-like placeholder levels for previews."""
+    levels = []
+    for index in range(max(1, count)):
+        position = index / max(1, count - 1)
+        envelope = 0.55 + 0.35 * math.sin(position * math.pi * 2.3 + 0.4) * math.sin(position * math.pi)
+        texture = 0.5 + 0.5 * math.sin(index * 1.7 + seed) * math.cos(index * 0.61 + seed * 0.3)
+        levels.append(max(0.08, min(1.0, envelope * (0.55 + 0.45 * texture))))
+    return levels
 
 
-def _portrait_glass_layout(settings: RenderSettings, design: dict[str, Any]) -> dict[str, Any]:
-    outer_w = settings.player_width if settings.bake_position and settings.player_width else settings.width
-    outer_h = settings.player_height if settings.bake_position and settings.player_height else settings.height
-    outer_x = settings.margin if settings.bake_position else 0
-    outer_y = settings.height - settings.margin - outer_h if settings.bake_position else 0
-    scale = max(0.05, min(outer_w / 420.0, outer_h / 640.0))
-    pad = max(1, int(4 * scale))
-    card_x = outer_x + pad
-    card_y = outer_y + pad
-    card_w = max(1, outer_w - pad * 2)
-    card_h = max(1, outer_h - pad * 2)
-    inner = max(1, min(card_w // 3, card_h // 3, int(24 * scale)))
-    lower_reserve = max(1, int(180 * scale))
-    cover_size = max(1, min(card_w - inner * 2, card_h - inner * 2, card_h - inner * 2 - lower_reserve))
-    cover_x = card_x + max(0, (card_w - cover_size) // 2)
-    cover_y = card_y + inner
-    text_x = card_x + inner
-    text_right = card_x + card_w - inner
-    progress_y = min(card_y + card_h - 1, card_y + card_h - max(1, int(28 * scale)))
-    time_box_h = max(1, int(32 * scale))
-    time_box_y = max(card_y, progress_y - max(1, int(52 * scale)))
-    return {
-        "scale": scale,
-        "pad": pad,
-        "outer_x": outer_x,
-        "outer_y": outer_y,
-        "outer_w": outer_w,
-        "outer_h": outer_h,
-        "card_x": card_x,
-        "card_y": card_y,
-        "card_w": card_w,
-        "card_h": card_h,
-        "radius": max(1, int(_int(design.get("corner_radius"), 20, 0, 64) * scale)),
-        "show_cover": True,
-        "cover_size": cover_size,
-        "cover_x": cover_x,
-        "cover_y": cover_y,
-        "text_x": text_x,
-        "text_right": text_right,
-        "max_text_w": max(1, text_right - text_x),
-        "artist_y": cover_y + cover_size + max(1, int(22 * scale)),
-        "title_y": cover_y + cover_size + max(1, int(52 * scale)),
-        "line_y": progress_y,
-        "time_box_x": text_x,
-        "time_box_y": time_box_y,
-        "time_box_w": max(1, text_right - text_x),
-        "time_box_h": time_box_h,
-        "time_font_size": max(8, int(_int(design.get("meta_size"), 16, 8, 30) * scale)),
-        "progress_x1": text_x,
-        "progress_x2": max(text_x + 1, text_right),
-        "progress_y": progress_y,
-        "progress_line_width": max(1, int(3 * scale)),
-        "knob_radius": max(1, int(4 * scale)),
-    }
+def _resample(levels: Sequence[float], count: int) -> list[float]:
+    if count <= 0:
+        return []
+    if not levels:
+        return [0.08] * count
+    if len(levels) == count:
+        return [float(value) for value in levels]
+    result = []
+    source = len(levels)
+    for index in range(count):
+        start = index * source / count
+        end = (index + 1) * source / count
+        lo = int(math.floor(start))
+        hi = max(lo + 1, int(math.ceil(end)))
+        window = [float(levels[min(source - 1, j)]) for j in range(lo, hi)]
+        result.append(max(window))
+    return result
 
 
-def _layout(settings: RenderSettings, design: dict[str, Any]) -> dict[str, Any]:
-    if settings.skin == "classic":
-        return _classic_layout(settings, design)
-    if settings.skin == "minimal":
-        return _minimal_layout(settings, design)
-    return _portrait_glass_layout(settings, design)
+# --------------------------------------------------------------------------------------------
+# Fonts
 
 
 def _font_directories() -> tuple[Path, ...]:
     if sys.platform.startswith("win"):
-        return (Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts",)
+        directories = [Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"]
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            directories.append(Path(local) / "Microsoft" / "Windows" / "Fonts")
+        return tuple(directories)
     if sys.platform == "darwin":
         return (
             Path.home() / "Library" / "Fonts",
@@ -416,93 +152,97 @@ def _font_directories() -> tuple[Path, ...]:
         Path.home() / ".local" / "share" / "fonts",
         Path.home() / ".fonts",
         Path("/usr/local/share/fonts"),
-        Path("/usr/share/fonts/truetype/dejavu"),
-        Path("/usr/share/fonts/truetype/liberation2"),
-        Path("/usr/share/fonts/truetype/liberation"),
+        Path("/usr/share/fonts"),
     )
 
 
-@lru_cache(maxsize=64)
-def _font_candidates_cached(family_text: str, bold: bool, light: bool) -> tuple[str, ...]:
-    candidates = []
-    family_map = {
-        "segoe ui": "segoeuib.ttf" if bold else "segoeuil.ttf" if light else "segoeui.ttf",
-        "arial": "arialbd.ttf" if bold else "arial.ttf",
-        "calibri": "calibrib.ttf" if bold else "calibri.ttf",
-        "tahoma": "tahomabd.ttf" if bold else "tahoma.ttf",
-        "verdana": "verdanab.ttf" if bold else "verdana.ttf",
-        "times new roman": "timesbd.ttf" if bold else "times.ttf",
-        "georgia": "georgiab.ttf" if bold else "georgia.ttf",
-        "trebuchet ms": "trebucbd.ttf" if bold else "trebuc.ttf",
-        "courier new": "courbd.ttf" if bold else "cour.ttf",
-        "impact": "impact.ttf",
-    }
-    if family_text:
-        family_path = Path(family_text)
-        if family_path.exists():
-            candidates.append(str(family_path))
-        mapped = family_map.get(family_text.lower())
-        if mapped:
-            candidates.extend(str(directory / mapped) for directory in _font_directories())
-        candidates.extend([family_text, f"{family_text}.ttf", f"{family_text}.otf"])
-        compact = "".join(ch for ch in family_text.lower() if ch.isalnum())
-        for fonts_dir in _font_directories():
-            if not compact or not fonts_dir.exists():
-                continue
-            try:
-                for font_file in list(fonts_dir.glob("*.ttf")) + list(fonts_dir.glob("*.otf")):
-                    stem = "".join(ch for ch in font_file.stem.lower() if ch.isalnum())
-                    if compact in stem or stem in compact:
-                        candidates.append(str(font_file))
-            except OSError:
-                pass
-    return tuple(candidates)
+_FAMILY_FILES = {
+    "segoe ui": ("segoeui.ttf", "segoeuib.ttf"),
+    "arial": ("arial.ttf", "arialbd.ttf"),
+    "calibri": ("calibri.ttf", "calibrib.ttf"),
+    "tahoma": ("tahoma.ttf", "tahomabd.ttf"),
+    "verdana": ("verdana.ttf", "verdanab.ttf"),
+    "times new roman": ("times.ttf", "timesbd.ttf"),
+    "georgia": ("georgia.ttf", "georgiab.ttf"),
+    "trebuchet ms": ("trebuc.ttf", "trebucbd.ttf"),
+    "courier new": ("cour.ttf", "courbd.ttf"),
+    "impact": ("impact.ttf", "impact.ttf"),
+    "consolas": ("consola.ttf", "consolab.ttf"),
+    "bahnschrift": ("bahnschrift.ttf", "bahnschrift.ttf"),
+}
+_FALLBACK_FILES = (
+    ("segoeui.ttf", "segoeuib.ttf"),
+    ("arial.ttf", "arialbd.ttf"),
+    ("Arial.ttf", "Arial Bold.ttf"),
+    ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"),
+    ("LiberationSans-Regular.ttf", "LiberationSans-Bold.ttf"),
+)
 
 
-def _font_candidates(family: Any, bold: bool, light: bool) -> list[str]:
-    return list(_font_candidates_cached(str(family or "").strip(), bold, light))
+@lru_cache(maxsize=1)
+def _font_index() -> dict[str, Path]:
+    index: dict[str, Path] = {}
+    for directory in _font_directories():
+        if not directory.is_dir():
+            continue
+        try:
+            for path in directory.rglob("*"):
+                if path.suffix.lower() in (".ttf", ".otf", ".ttc"):
+                    index.setdefault(path.name.lower(), path)
+        except OSError:
+            continue
+    return index
 
 
-def _font(size: int, bold: bool = False, light: bool = False, family: Any = None) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    candidates = []
-    candidates.extend(_font_candidates(family, bold, light))
-    if bold:
-        candidates.extend([
-            r"C:\Windows\Fonts\segoeuib.ttf",
-            r"C:\Windows\Fonts\arialbd.ttf",
-            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-            "/Library/Fonts/Arial Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-        ])
-    elif light:
-        candidates.extend([
-            r"C:\Windows\Fonts\segoeuil.ttf",
-            r"C:\Windows\Fonts\segoeui.ttf",
-            r"C:\Windows\Fonts\arial.ttf",
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "/Library/Fonts/Arial.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-        ])
-    else:
-        candidates.extend([
-            r"C:\Windows\Fonts\segoeui.ttf",
-            r"C:\Windows\Fonts\arial.ttf",
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "/Library/Fonts/Arial.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-        ])
-
-    for candidate in candidates:
-        if Path(candidate).exists():
-            return ImageFont.truetype(candidate, size=size)
-    return ImageFont.load_default()
+@lru_cache(maxsize=128)
+def _font_path(family: str, bold: bool) -> str | None:
+    index = _font_index()
+    family_text = (family or "").strip()
+    if family_text and Path(family_text).is_file():
+        return family_text
+    mapped = _FAMILY_FILES.get(family_text.lower())
+    if mapped:
+        path = index.get(mapped[1 if bold else 0].lower())
+        if path:
+            return str(path)
+    compact = "".join(char for char in family_text.lower() if char.isalnum())
+    if compact:
+        candidates = []
+        for name, path in index.items():
+            stem = "".join(char for char in Path(name).stem.lower() if char.isalnum())
+            if stem.startswith(compact):
+                suffix = stem[len(compact):]
+                score = 0 if suffix in ("", "regular") else 5
+                if bold:
+                    score = 0 if suffix in ("bold", "bd", "b") else (2 if "bold" in suffix else 6)
+                elif "bold" in suffix or "black" in suffix or "italic" in suffix:
+                    score = 9
+                candidates.append((score, len(stem), str(path)))
+        if candidates:
+            return sorted(candidates)[0][2]
+    for regular, heavy in _FALLBACK_FILES:
+        path = index.get((heavy if bold else regular).lower())
+        if path:
+            return str(path)
+    return None
 
 
-def _font_safe_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> str:
+@lru_cache(maxsize=256)
+def _font(size: int, family: str = "Segoe UI", bold: bool = False) -> FontType:
+    path = _font_path(family, bold)
+    size = max(4, int(size))
+    if path:
+        try:
+            return ImageFont.truetype(path, size=size)
+        except OSError:
+            pass
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # pragma: no cover - Pillow < 10.1
+        return ImageFont.load_default()
+
+
+def _safe_text(draw: ImageDraw.ImageDraw, text: str, font: FontType) -> str:
     try:
         draw.textlength(text, font=font)
         return text
@@ -510,79 +250,22 @@ def _font_safe_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageF
         return text.encode("ascii", errors="replace").decode("ascii")
 
 
-def _fit_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_width: int) -> str:
-    text = _font_safe_text(draw, text, font)
+def _fit_text(draw: ImageDraw.ImageDraw, text: str, font: FontType, max_width: float) -> str:
+    text = _safe_text(draw, text, font)
     if draw.textlength(text, font=font) <= max_width:
         return text
-    suffix = "..."
-    while text and draw.textlength(text + suffix, font=font) > max_width:
+    ellipsis = "\u2026"
+    try:
+        draw.textlength(ellipsis, font=font)
+    except UnicodeError:
+        ellipsis = "..."
+    while text and draw.textlength(text.rstrip() + ellipsis, font=font) > max_width:
         text = text[:-1]
-    return (text + suffix) if text else suffix
+    return (text.rstrip() + ellipsis) if text else ellipsis
 
 
-def _fit_font(draw: ImageDraw.ImageDraw, text: str, size: int, min_size: int, max_width: int, light: bool = False) -> ImageFont.ImageFont:
-    for candidate_size in range(size, min_size - 1, -1):
-        font = _font(candidate_size, light=light)
-        if draw.textlength(text, font=font) <= max_width:
-            return font
-    return _font(min_size, light=light)
-
-
-def _rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
-    mask = Image.new("L", size, 0)
-    draw = ImageDraw.Draw(mask)
-    draw.rounded_rectangle((0, 0, size[0], size[1]), radius=radius, fill=255)
-    return mask
-
-
-def _cover_image(metadata: TrackMetadata, size: int) -> Image.Image:
-    if metadata.cover_path and Path(metadata.cover_path).exists():
-        try:
-            image = Image.open(metadata.cover_path).convert("RGBA")
-            image = _crop_square(image).resize((size, size), Image.Resampling.LANCZOS)
-            return image
-        except Exception:
-            pass
-
-    logo = _fallback_logo_image()
-    if logo:
-        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        bbox = logo.getchannel("A").getbbox() or logo.getbbox()
-        if bbox:
-            logo = logo.crop(bbox)
-        max_w = int(size * 0.62)
-        max_h = int(size * 0.62)
-        logo.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
-        logo_x = (size - logo.width) // 2
-        logo_y = (size - logo.height) // 2
-        image.alpha_composite(logo, (logo_x, logo_y))
-    else:
-        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(image)
-        draw.ellipse((size * 0.28, size * 0.22, size * 0.72, size * 0.66), fill=(255, 255, 255, 55))
-        draw.rectangle((size * 0.62, size * 0.42, size * 0.68, size * 0.84), fill=(255, 255, 255, 80))
-        draw.ellipse((size * 0.46, size * 0.70, size * 0.68, size * 0.92), fill=(255, 255, 255, 80))
-    return image
-
-
-def _fallback_logo_image() -> Image.Image | None:
-    candidates = []
-    env_path = os.environ.get("DAVINCI_TRACK_VISUALIZER_LOGO")
-    if env_path:
-        candidates.append(Path(env_path))
-    candidates.extend([
-        Path.cwd() / "aplus.png",
-        Path(sys.executable).resolve().parent / "aplus.png",
-        Path(__file__).resolve().parents[1] / "aplus.png",
-    ])
-
-    for candidate in candidates:
-        try:
-            if candidate.exists():
-                return Image.open(candidate).convert("RGBA")
-        except Exception:
-            continue
-    return None
+# --------------------------------------------------------------------------------------------
+# Artwork
 
 
 def _crop_square(image: Image.Image) -> Image.Image:
@@ -593,551 +276,657 @@ def _crop_square(image: Image.Image) -> Image.Image:
     return image.crop((left, top, left + side, top + side))
 
 
-def _draw_glass(frame: Image.Image, settings: RenderSettings, design: dict[str, Any], layout: dict[str, Any]) -> None:
-    card_w = int(layout["card_w"])
-    card_h = int(layout["card_h"])
-    card_x = int(layout["card_x"])
-    card_y = int(layout["card_y"])
-    radius = int(layout["radius"])
-    scale = float(layout["scale"])
-    mask = _rounded_mask((card_w, card_h), radius)
-    glass = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
-    glass_draw = ImageDraw.Draw(glass)
-    strength = _int(design.get("glass_strength"), 64, 0, 100)
-
-    inner = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
-    inner_draw = ImageDraw.Draw(inner)
-    inner_draw.rounded_rectangle(
-        (int(2 * scale), int(2 * scale), card_w - int(3 * scale), card_h - int(3 * scale)),
-        radius=max(1, radius - int(2 * scale)),
-        outline=(255, 255, 255, int(strength * 0.52)),
-        width=max(1, int(1 * scale)),
+def _fallback_logo_image() -> Image.Image | None:
+    candidates = []
+    env_path = os.environ.get("DAVINCI_TRACK_VISUALIZER_LOGO")
+    if env_path:
+        candidates.append(Path(env_path))
+    candidates.extend(
+        [
+            Path(sys.executable).resolve().parent / "aplus.png",
+            Path(__file__).resolve().parents[1] / "aplus.png",
+        ]
     )
-    inner_draw.rounded_rectangle(
-        (int(5 * scale), int(5 * scale), card_w - int(6 * scale), card_h - int(6 * scale)),
-        radius=max(1, radius - int(5 * scale)),
-        outline=(0, 0, 0, int(strength * 0.32)),
-        width=max(1, int(1 * scale)),
-    )
-    glass.alpha_composite(inner)
-
-    shine = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
-    shine_draw = ImageDraw.Draw(shine)
-    shine_draw.rounded_rectangle(
-        (int(10 * scale), int(8 * scale), card_w - int(10 * scale), int(34 * scale)),
-        radius=max(1, int(10 * scale)),
-        fill=(255, 255, 255, int(strength * 0.16)),
-    )
-    shine_draw.line((int(16 * scale), int(10 * scale), card_w - int(16 * scale), int(10 * scale)), fill=(255, 255, 255, int(strength * 0.70)), width=max(1, int(1 * scale)))
-    shine = shine.filter(ImageFilter.GaussianBlur(max(1, int(5 * scale))))
-    glass.alpha_composite(shine)
-
-    shadow = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
-    shadow_draw = ImageDraw.Draw(shadow)
-    shadow_draw.rectangle((0, int(card_h * 0.55), card_w, card_h), fill=(0, 0, 0, int(strength * 0.16)))
-    shadow = shadow.filter(ImageFilter.GaussianBlur(max(3, int(9 * scale))))
-    glass.alpha_composite(shadow)
-
-    try:
-        noise = Image.effect_noise((card_w, card_h), 12).convert("L")
-        noise_alpha = noise.point(lambda px: 2 if px > 172 else 0)
-        noise_layer = Image.new("RGBA", (card_w, card_h), (255, 255, 255, 0))
-        noise_layer.putalpha(noise_alpha)
-        glass.alpha_composite(noise_layer)
-    except Exception:
-        pass
-
-    frame.alpha_composite(_masked_alpha(glass, mask), (card_x, card_y))
-
-
-def _draw_classic_static(
-    frame: Image.Image,
-    metadata: TrackMetadata,
-    settings: RenderSettings,
-) -> None:
-    draw = ImageDraw.Draw(frame)
-    design = _effective_design(settings)
-    layout = _layout(settings, design)
-    scale = float(layout["scale"])
-    card_w = int(layout["card_w"])
-    card_h = int(layout["card_h"])
-    card_x = int(layout["card_x"])
-    card_y = int(layout["card_y"])
-    radius = int(layout["radius"])
-
-    shadow = Image.new("RGBA", (settings.width, settings.height), (0, 0, 0, 0))
-    shadow_draw = ImageDraw.Draw(shadow)
-    shadow_draw.rounded_rectangle(
-        (card_x, card_y + int(3 * scale), card_x + card_w - 1, card_y + card_h + int(2 * scale)),
-        radius=radius,
-        fill=(0, 0, 0, 96),
-    )
-    shadow = shadow.filter(ImageFilter.GaussianBlur(max(3, int(5 * scale))))
-    frame.alpha_composite(shadow)
-
-    draw.rounded_rectangle(
-        (card_x, card_y, card_x + card_w - 1, card_y + card_h - 1),
-        radius=radius,
-        fill=_rgba(design.get("panel_color"), design.get("panel_alpha"), "#121619"),
-        outline=_rgba(design.get("border_color"), design.get("border_alpha"), "#FFFFFF"),
-        width=max(1, int(1 * scale)),
-    )
-    if _bool(design.get("glass_enabled")):
-        _draw_glass(frame, settings, design, layout)
-
-    if layout["show_cover"]:
-        cover_size = int(layout["cover_size"])
-        cover_x = int(layout["cover_x"])
-        cover_y = int(layout["cover_y"])
-        cover = _cover_image(metadata, cover_size)
-        mask = _rounded_mask((cover_size, cover_size), int(8 * scale))
-        cover = cover.copy()
-        cover.putalpha(ImageChops.multiply(cover.getchannel("A"), mask))
-        frame.alpha_composite(cover, (cover_x, cover_y))
-
-    text_x = int(layout["text_x"])
-    max_text_w = int(layout["max_text_w"])
-    artist_size = _int(design.get("artist_size"), 14, 8, 36)
-    title_size = _int(design.get("title_size"), 24, 10, 48)
-    meta_size = _int(design.get("meta_size"), 12, 8, 30)
-    artist_font = _font(max(8, int(artist_size * scale)), family=design.get("artist_font_family"))
-    title_font = _font(max(10, int(title_size * scale)), family=design.get("title_font_family"))
-    label_font = _font(max(8, int(meta_size * scale)))
-
-    artist = _fit_text(draw, metadata.artist.upper(), artist_font, max_text_w)
-    title = _fit_text(draw, metadata.title, title_font, max_text_w)
-    draw.text((text_x, card_y + int(26 * scale)), artist, font=artist_font, fill=_rgba(design.get("secondary_text_color"), 226, "#EEF3F5"))
-    draw.text((text_x, card_y + int(53 * scale)), title, font=title_font, fill=_rgba(design.get("primary_text_color"), 255, "#F5F7F8"))
-
-    if _bool(design.get("show_brand")):
-        label = _font_safe_text(draw, str(design.get("brand_text") or "aplus.fm"), label_font)
-        label_w = draw.textlength(label, font=label_font)
-        draw.text((card_x + card_w - label_w - int(20 * scale), card_y + int(16 * scale)), label, font=label_font, fill=_rgba(design.get("secondary_text_color"), 235, "#EEF3F5"))
-
-
-def _draw_minimal_static(
-    frame: Image.Image,
-    metadata: TrackMetadata,
-    settings: RenderSettings,
-) -> None:
-    draw = ImageDraw.Draw(frame)
-    design = _effective_design(settings)
-    layout = _layout(settings, design)
-    scale = float(layout["scale"])
-    card_x = int(layout["card_x"])
-    card_y = int(layout["card_y"])
-    card_w = int(layout["card_w"])
-    card_h = int(layout["card_h"])
-    radius = int(layout["radius"])
-
-    draw.rounded_rectangle(
-        (card_x, card_y, card_x + card_w - 1, card_y + card_h - 1),
-        radius=radius,
-        fill=_rgba(design.get("panel_color"), design.get("panel_alpha"), "#121619"),
-        outline=_rgba(design.get("secondary_text_color"), design.get("border_alpha"), "#EEF3F5"),
-        width=max(1, int(1 * scale)),
-    )
-    draw.rectangle(
-        (card_x, card_y, card_x + max(2, int(7 * scale)), card_y + card_h - 1),
-        fill=_rgba(design.get("secondary_text_color"), 255, "#F2A900"),
-    )
-
-    artist_size = _int(design.get("artist_size"), 18, 8, 36)
-    title_size = _int(design.get("title_size"), 32, 10, 48)
-    artist_font = _font(max(8, int(artist_size * scale)), family=design.get("artist_font_family"))
-    title_font = _font(max(10, int(title_size * scale)), family=design.get("title_font_family"))
-    text_x = int(layout["text_x"])
-    max_text_w = int(layout["max_text_w"])
-    artist = _fit_text(draw, metadata.artist.upper(), artist_font, max_text_w)
-    title = _fit_text(draw, metadata.title.upper(), title_font, max_text_w)
-    draw.text(
-        (text_x, card_y + max(1, int(42 * scale))),
-        artist,
-        font=artist_font,
-        fill=_rgba(design.get("secondary_text_color"), 255, "#EEF3F5"),
-    )
-    draw.text(
-        (text_x, card_y + max(1, int(72 * scale))),
-        title,
-        font=title_font,
-        fill=_rgba(design.get("primary_text_color"), 255, "#F5F7F8"),
-    )
-
-    timer_x = int(layout["timer_x"])
-    timer_y = int(layout["timer_y"])
-    timer_w = int(layout["timer_w"])
-    timer_h = int(layout["timer_h"])
-    draw.rounded_rectangle(
-        (timer_x, timer_y, timer_x + timer_w - 1, timer_y + timer_h - 1),
-        radius=0,
-        fill=_rgba(design.get("primary_text_color"), 255, "#F5F7F8"),
-    )
-
-
-def _draw_portrait_glass_static(
-    frame: Image.Image,
-    metadata: TrackMetadata,
-    settings: RenderSettings,
-) -> None:
-    draw = ImageDraw.Draw(frame)
-    design = _effective_design(settings)
-    layout = _layout(settings, design)
-    scale = float(layout["scale"])
-    card_x = int(layout["card_x"])
-    card_y = int(layout["card_y"])
-    card_w = int(layout["card_w"])
-    card_h = int(layout["card_h"])
-    radius = int(layout["radius"])
-
-    shadow = Image.new("RGBA", (settings.width, settings.height), (0, 0, 0, 0))
-    shadow_draw = ImageDraw.Draw(shadow)
-    shadow_draw.rounded_rectangle(
-        (card_x, card_y + max(1, int(5 * scale)), card_x + card_w - 1, card_y + card_h - 1),
-        radius=radius,
-        fill=(0, 0, 0, 104),
-    )
-    frame.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(max(2, int(8 * scale)))))
-    draw.rounded_rectangle(
-        (card_x, card_y, card_x + card_w - 1, card_y + card_h - 1),
-        radius=radius,
-        fill=_rgba(design.get("panel_color"), design.get("panel_alpha"), "#121619"),
-        outline=_rgba(design.get("border_color"), design.get("border_alpha"), "#FFFFFF"),
-        width=max(1, int(1 * scale)),
-    )
-    _draw_glass(frame, settings, design, layout)
-
-    cover_size = int(layout["cover_size"])
-    cover_x = int(layout["cover_x"])
-    cover_y = int(layout["cover_y"])
-    cover = _cover_image(metadata, cover_size)
-    cover_mask = _rounded_mask((cover_size, cover_size), max(1, int(14 * scale)))
-    cover = cover.copy()
-    cover.putalpha(ImageChops.multiply(cover.getchannel("A"), cover_mask))
-    frame.alpha_composite(cover, (cover_x, cover_y))
-
-    text_x = int(layout["text_x"])
-    max_text_w = int(layout["max_text_w"])
-    artist_size = _int(design.get("artist_size"), 18, 8, 36)
-    title_size = _int(design.get("title_size"), 32, 10, 48)
-    artist_font = _font(max(8, int(artist_size * scale)), family=design.get("artist_font_family"))
-    title_font = _font(max(10, int(title_size * scale)), family=design.get("title_font_family"))
-    artist = _fit_text(draw, metadata.artist.upper(), artist_font, max_text_w)
-    title = _fit_text(draw, metadata.title, title_font, max_text_w)
-    draw.text(
-        (text_x, int(layout["artist_y"])),
-        artist,
-        font=artist_font,
-        fill=_rgba(design.get("secondary_text_color"), 226, "#EEF3F5"),
-    )
-    draw.text(
-        (text_x, int(layout["title_y"])),
-        title,
-        font=title_font,
-        fill=_rgba(design.get("primary_text_color"), 255, "#F5F7F8"),
-    )
-
-
-def _draw_card_static(
-    frame: Image.Image,
-    metadata: TrackMetadata,
-    settings: RenderSettings,
-) -> None:
-    if settings.skin == "classic":
-        _draw_classic_static(frame, metadata, settings)
-    elif settings.skin == "minimal":
-        _draw_minimal_static(frame, metadata, settings)
-    else:
-        _draw_portrait_glass_static(frame, metadata, settings)
-
-
-def _dynamic_spec(metadata: TrackMetadata, settings: RenderSettings) -> dict[str, Any]:
-    design = _effective_design(settings)
-    layout = _layout(settings, design)
-    scale = float(layout["scale"])
-    time_box = {
-        "x": int(layout["time_box_x"]),
-        "y": int(layout["time_box_y"]),
-        "width": int(layout["time_box_w"]),
-        "height": int(layout["time_box_h"]),
-    }
-    time_color = design.get("panel_color") if settings.skin == "minimal" else design.get("secondary_text_color")
-    time_fallback = "#121619" if settings.skin == "minimal" else "#EEF3F5"
-    time_alpha = 255 if settings.skin == "minimal" else 220
-    accent_color = list(_hex_to_rgb(design.get("accent_color"), "#EBEEF0"))
-    return {
-        "schema": LIVE_DYNAMIC_SCHEMA,
-        "version": LIVE_DYNAMIC_SCHEMA_VERSION,
-        "skin": settings.skin,
-        "canvas": {
-            "width": int(settings.width),
-            "height": int(settings.height),
-        },
-        "duration_seconds": float(metadata.duration),
-        "total_duration_label": format_mmss(metadata.duration),
-        "player": {
-            "x": int(layout["outer_x"]),
-            "y": int(layout["outer_y"]),
-            "width": int(layout["outer_w"]),
-            "height": int(layout["outer_h"]),
-            "margin": int(settings.margin),
-            "bake_position": bool(settings.bake_position),
-            "scale": scale,
-            "card_x": int(layout["card_x"]),
-            "card_y": int(layout["card_y"]),
-            "card_width": int(layout["card_w"]),
-            "card_height": int(layout["card_h"]),
-        },
-        "time": {
-            "box": time_box,
-            "x": time_box["x"] + time_box["width"],
-            "y": time_box["y"] + time_box["height"] / 2.0,
-            "anchor": "right_center",
-            "horizontal_alignment": "right",
-            "vertical_alignment": "center",
-            "fusion_horizontal_justification": "right",
-            "fusion_vertical_justification": "center",
-            "font_family": "Segoe UI",
-            "font_size": int(layout["time_font_size"]),
-            "color": list(_hex_to_rgb(time_color, time_fallback)),
-            "alpha": time_alpha,
-        },
-        "progress": {
-            "x1": int(layout["progress_x1"]),
-            "x2": int(layout["progress_x2"]),
-            "y": int(layout["progress_y"]),
-            "line_width": int(layout["progress_line_width"]),
-            "track_color": list(_hex_to_rgb(design.get("track_color"), "#EBEEF0")),
-            "track_alpha": 104,
-            "accent_color": accent_color,
-            "accent_alpha": 218,
-            "knob_radius": int(layout["knob_radius"]),
-            "knob_alpha": 235,
-        },
-        "show_time": _bool(design.get("show_time")),
-        "show_progress": _bool(design.get("show_progress")),
-        "show_knob": _bool(design.get("show_knob")),
-    }
-
-
-def _draw_dynamic_spec(
-    frame: Image.Image,
-    metadata: TrackMetadata,
-    current_time: float,
-    spec: dict[str, Any],
-) -> None:
-    draw = ImageDraw.Draw(frame)
-    duration = max(0.001, metadata.duration)
-    progress_value = max(0.0, min(1.0, current_time / duration))
-
-    if spec["show_time"]:
-        time_spec = spec["time"]
-        time_text = f"{format_mmss(current_time)} / {format_mmss(metadata.duration)}"
-        time_font = _font(int(time_spec["font_size"]), bold=spec.get("skin") == "minimal")
-        time_text = _font_safe_text(draw, time_text, time_font)
-        position = (float(time_spec["x"]), float(time_spec["y"]))
-        fill = tuple(time_spec["color"]) + (int(time_spec["alpha"]),)
+    for candidate in candidates:
         try:
-            draw.text(position, time_text, font=time_font, fill=fill, anchor="rm")
-        except (TypeError, ValueError):
-            text_width = draw.textlength(time_text, font=time_font)
-            box = time_spec["box"]
-            draw.text(
-                (float(time_spec["x"]) - text_width, float(box["y"])),
-                time_text,
-                font=time_font,
-                fill=fill,
-            )
-
-    if spec["show_progress"]:
-        progress = spec["progress"]
-        line_x1 = int(progress["x1"])
-        line_x2 = int(progress["x2"])
-        line_y = int(progress["y"])
-        knob_x = line_x1 + int((line_x2 - line_x1) * progress_value)
-        track_fill = tuple(progress["track_color"]) + (int(progress["track_alpha"]),)
-        accent_fill = tuple(progress["accent_color"]) + (int(progress["accent_alpha"]),)
-        draw.line((line_x1, line_y, line_x2, line_y), fill=track_fill, width=int(progress["line_width"]))
-        draw.line((line_x1, line_y, knob_x, line_y), fill=accent_fill, width=int(progress["line_width"]))
-        if spec["show_knob"]:
-            knob_r = int(progress["knob_radius"])
-            knob_fill = tuple(progress["accent_color"]) + (int(progress["knob_alpha"]),)
-            draw.ellipse((knob_x - knob_r, line_y - knob_r, knob_x + knob_r, line_y + knob_r), fill=knob_fill)
+            if candidate.is_file():
+                return Image.open(candidate).convert("RGBA")
+        except Exception:
+            continue
+    return None
 
 
-def _draw_card_dynamic(
-    frame: Image.Image,
-    metadata: TrackMetadata,
-    current_time: float,
-    settings: RenderSettings,
-) -> None:
-    _draw_dynamic_spec(frame, metadata, current_time, _dynamic_spec(metadata, settings))
+def _cover_image(cover_path: str | None, size: int, tint: tuple[int, int, int]) -> Image.Image:
+    size = max(1, int(size))
+    if cover_path and Path(cover_path).is_file():
+        try:
+            image = Image.open(cover_path).convert("RGBA")
+            return _crop_square(image).resize((size, size), Image.Resampling.LANCZOS)
+        except Exception:
+            pass
+    base = tuple(int(channel * 0.22 + 18) for channel in tint)
+    image = Image.new("RGBA", (size, size), base + (255,))
+    logo = _fallback_logo_image()
+    if logo:
+        bbox = logo.getchannel("A").getbbox() or logo.getbbox()
+        if bbox:
+            logo = logo.crop(bbox)
+        logo.thumbnail((int(size * 0.62), int(size * 0.62)), Image.Resampling.LANCZOS)
+        image.alpha_composite(logo, ((size - logo.width) // 2, (size - logo.height) // 2))
+    else:
+        draw = ImageDraw.Draw(image)
+        # A simple music note.
+        draw.ellipse((size * 0.30, size * 0.58, size * 0.50, size * 0.76), fill=(255, 255, 255, 150))
+        draw.rectangle((size * 0.46, size * 0.24, size * 0.50, size * 0.67), fill=(255, 255, 255, 150))
+        draw.polygon(
+            [(size * 0.50, size * 0.24), (size * 0.70, size * 0.30), (size * 0.70, size * 0.38), (size * 0.50, size * 0.32)],
+            fill=(255, 255, 255, 150),
+        )
+    return image
 
 
-def render_live_carrier(
-    metadata: TrackMetadata,
-    output_path: str | Path,
-    settings: RenderSettings,
-) -> tuple[Path, dict[str, Any]]:
-    target = Path(output_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-
-    frame = Image.new("RGBA", (settings.width, settings.height), (0, 0, 0, 0))
-    _draw_card_static(frame, metadata, settings)
-    frame.save(target, format="PNG")
-
-    return target, _dynamic_spec(metadata, settings)
+# --------------------------------------------------------------------------------------------
+# Placement
 
 
-def _draw_card(
-    frame: Image.Image,
-    metadata: TrackMetadata,
-    levels: list[float],
-    current_time: float,
-    settings: RenderSettings,
-) -> None:
-    _draw_card_static(frame, metadata, settings)
-    _draw_card_dynamic(frame, metadata, current_time, settings)
+def _unit(width: int, height: int) -> float:
+    return min(width, height) / 1080.0
 
 
-def draw_frame(
-    metadata: TrackMetadata,
-    levels: list[float],
-    current_time: float,
-    settings: RenderSettings,
-) -> Image.Image:
-    frame = Image.new("RGBA", (settings.width, settings.height), (0, 0, 0, 0))
-    _draw_card(frame, metadata, levels, current_time, settings)
+def player_bounds(design: Mapping[str, Any], skin: str, width: int, height: int) -> tuple[int, int, int, int, float]:
+    """Return ``(x, y, w, h, scale)`` of the player box inside a ``width``×``height`` frame."""
+    base_w, base_h = SKIN_BASE_SIZES[check_skin(skin)]
+    unit = _unit(width, height)
+    scale = unit * float(design.get("scale", 100)) / 100.0
+    box_w = max(1, int(round(base_w * scale)))
+    box_h = max(1, int(round(base_h * scale)))
+    if box_w > width or box_h > height:
+        shrink = min(width / box_w, height / box_h)
+        scale *= shrink
+        box_w = max(1, int(base_w * scale))
+        box_h = max(1, int(base_h * scale))
+    margin_x = int(round(float(design.get("margin_x", 48)) * unit))
+    margin_y = int(round(float(design.get("margin_y", 48)) * unit))
+    anchor = str(design.get("anchor") or "bottom_left")
+    if anchor.endswith("left"):
+        x = margin_x
+    elif anchor.endswith("right"):
+        x = width - margin_x - box_w
+    else:
+        x = (width - box_w) // 2
+    if anchor.startswith("top"):
+        y = margin_y
+    elif anchor.startswith("bottom"):
+        y = height - margin_y - box_h
+    else:
+        y = (height - box_h) // 2
+    x = max(0, min(width - box_w, x))
+    y = max(0, min(height - box_h, y))
+    return x, y, box_w, box_h, scale
+
+
+# --------------------------------------------------------------------------------------------
+# Painter
+
+
+class _Painter:
+    def __init__(self, width: int, height: int, design: Mapping[str, Any], skin: str, info: TrackInfo, levels: Sequence[float] | None):
+        self.width = width
+        self.height = height
+        self.design = design
+        self.skin = skin
+        self.info = info
+        self.levels = list(levels) if levels else sample_levels(int(design.get("bar_count", 72)))
+        self.flags = effective_flags(design, skin)
+        self.card = _blank(width, height)
+        self.played: Image.Image | None = None
+        self.knob: Image.Image | None = None
+        self.progress: tuple[float, float] | None = None
+        self.texts: list[TextSpec] = []
+        self.x, self.y, self.w, self.h, self.s = player_bounds(design, skin, width, height)
+
+    # coordinates -------------------------------------------------------------------------
+    def px(self, value: float) -> float:
+        return self.x + value * self.s
+
+    def py(self, value: float) -> float:
+        return self.y + value * self.s
+
+    def sz(self, value: float) -> int:
+        return max(1, int(round(value * self.s)))
+
+    # layers ------------------------------------------------------------------------------
+    def played_layer(self) -> Image.Image:
+        if self.played is None:
+            self.played = _blank(self.width, self.height)
+        return self.played
+
+    def knob_layer(self) -> Image.Image:
+        if self.knob is None:
+            self.knob = _blank(self.width, self.height)
+        return self.knob
+
+    # colours -----------------------------------------------------------------------------
+    def color(self, key: str, alpha: float = 255) -> tuple[int, int, int, int]:
+        return _rgba(self.design.get(key), alpha)
+
+    # building blocks ---------------------------------------------------------------------
+    def panel(self, rect: tuple[float, float, float, float], radius: float, *, shadow: float = 96, glass: bool | None = None, outline_key: str = "border_color") -> None:
+        x1, y1, x2, y2 = (int(round(v)) for v in rect)
+        r = max(0, int(round(radius)))
+        if shadow > 0:
+            layer = _blank(self.width, self.height)
+            offset = self.sz(4)
+            ImageDraw.Draw(layer).rounded_rectangle((x1, y1 + offset, x2, y2 + offset), radius=r, fill=(0, 0, 0, int(shadow)))
+            self.card.alpha_composite(layer.filter(ImageFilter.GaussianBlur(max(2, self.sz(8)))))
+        draw = ImageDraw.Draw(self.card)
+        draw.rounded_rectangle(
+            (x1, y1, x2, y2),
+            radius=r,
+            fill=self.color("panel_color", self.design.get("panel_alpha", 154)),
+            outline=self.color(outline_key, self.design.get("border_alpha", 82)),
+            width=max(1, self.sz(1)),
+        )
+        if self.flags["glass"] if glass is None else glass:
+            self._glass(x1, y1, x2 - x1 + 1, y2 - y1 + 1, r)
+
+    def _glass(self, x: int, y: int, w: int, h: int, radius: int) -> None:
+        strength = float(self.design.get("glass_strength", 46))
+        if strength <= 0 or w < 8 or h < 8:
+            return
+        s = self.s
+        glass = _blank(w, h)
+        draw = ImageDraw.Draw(glass)
+        inset = max(1, int(2 * s))
+        draw.rounded_rectangle(
+            (inset, inset, w - inset - 1, h - inset - 1),
+            radius=max(1, radius - inset),
+            outline=(255, 255, 255, int(strength * 0.45)),
+            width=max(1, int(1 * s)),
+        )
+        shine = _blank(w, h)
+        shine_draw = ImageDraw.Draw(shine)
+        shine_draw.rounded_rectangle(
+            (int(10 * s), int(6 * s), w - int(10 * s), int(max(12, h * 0.22))),
+            radius=max(1, int(10 * s)),
+            fill=(255, 255, 255, int(strength * 0.14)),
+        )
+        glass.alpha_composite(shine.filter(ImageFilter.GaussianBlur(max(1, int(6 * s)))))
+        shade = _blank(w, h)
+        ImageDraw.Draw(shade).rectangle((0, int(h * 0.58), w, h), fill=(0, 0, 0, int(strength * 0.18)))
+        glass.alpha_composite(shade.filter(ImageFilter.GaussianBlur(max(3, int(10 * s)))))
+        mask = _rounded_mask((w, h), radius)
+        glass.putalpha(ImageChops.multiply(glass.getchannel("A"), mask))
+        self.card.alpha_composite(glass, (x, y))
+
+    def cover(self, x: float, y: float, size: float, radius: float) -> None:
+        side = max(1, int(round(size)))
+        image = _cover_image(self.info.cover_path, side, _hex_to_rgb(self.design.get("accent_color")))
+        mask = _rounded_mask((side, side), int(round(radius)))
+        image.putalpha(ImageChops.multiply(image.getchannel("A"), mask))
+        self.card.alpha_composite(image, (int(round(x)), int(round(y))))
+
+    def font(self, size_key: str, family_key: str, bold: bool = False, factor: float = 1.0) -> FontType:
+        return _font(self.sz(float(self.design.get(size_key, 16)) * factor), str(self.design.get(family_key) or "Segoe UI"), bold)
+
+    def text(self, x: float, y: float, text: str, font: FontType, fill: tuple[int, int, int, int], max_width: float, anchor: str = "la") -> None:
+        draw = ImageDraw.Draw(self.card)
+        fitted = _fit_text(draw, text, font, max(1.0, max_width))
+        draw.text((x, y), fitted, font=font, fill=fill, anchor=anchor)
+
+    def artist_text(self) -> str:
+        artist = self.info.artist or ""
+        return artist.upper() if self.design.get("uppercase_artist") else artist
+
+    def brand(self, right: float, top: float) -> None:
+        if not self.flags["brand"]:
+            return
+        draw = ImageDraw.Draw(self.card)
+        size = self.sz(13)
+        font = _font(size, str(self.design.get("artist_font_family") or "Segoe UI"))
+        color = self.color("secondary_text_color", 200)
+        icon_r = max(3, int(size * 0.62))
+        cx = right - icon_r
+        cy = top + icon_r
+        draw.ellipse((cx - icon_r, cy - icon_r, cx + icon_r, cy + icon_r), outline=color, width=max(1, self.sz(1.4)))
+        tri = icon_r * 0.5
+        draw.polygon([(cx - tri * 0.55, cy - tri), (cx - tri * 0.55, cy + tri), (cx + tri, cy)], fill=color)
+        label = _safe_text(draw, str(self.design.get("brand_text") or ""), font)
+        draw.text((cx - icon_r - self.sz(6), cy), label, font=font, fill=color, anchor="rm")
+
+    def bars(self, x1: float, x2: float, base_y: float, max_h: float, *, mode: str, width_ratio: float, reflection: float = 0.0, min_pitch: float = 3.0) -> None:
+        if x2 - x1 < 4:
+            return
+        requested = int(self.design.get("bar_count", 72))
+        pitch_min = max(2.0, min_pitch * self.s)
+        count = max(4, min(requested, int((x2 - x1) / pitch_min)))
+        levels = _resample(self.levels, count)
+        pitch = (x2 - x1) / count
+        bar_w = max(1.0, pitch * width_ratio)
+        track = ImageDraw.Draw(self.card)
+        played = ImageDraw.Draw(self.played_layer())
+        track_fill = self.color("track_color", 96)
+        accent_fill = self.color("accent_color", 255)
+        reflect_track = self.color("track_color", 34)
+        reflect_accent = self.color("accent_color", 80)
+        radius = bar_w / 2 if bar_w >= 3 else 0
+        min_h = max(1.0, 1.5 * self.s)
+        for index, level in enumerate(levels):
+            left = x1 + index * pitch + (pitch - bar_w) / 2
+            right = left + bar_w
+            height = max(min_h, level * max_h)
+            if mode == "mirror":
+                box = (left, base_y - height / 2, right, base_y + height / 2)
+            else:
+                box = (left, base_y - height, right, base_y)
+            for drawer, fill in ((track, track_fill), (played, accent_fill)):
+                if radius:
+                    drawer.rounded_rectangle(box, radius=radius, fill=fill)
+                else:
+                    drawer.rectangle(box, fill=fill)
+            if reflection > 0 and mode != "mirror":
+                gap = max(1.0, 1.5 * self.s)
+                reflected = (left, base_y + gap, right, base_y + gap + height * reflection)
+                track.rectangle(reflected, fill=reflect_track)
+                played.rectangle(reflected, fill=reflect_accent)
+        self._progress_span(x1, x2)
+
+    def line(self, x1: float, x2: float, y: float, thickness: float, *, track_alpha: float = 80, track_key: str = "track_color", accent_key: str = "accent_color", accent_alpha: float = 235) -> None:
+        half = max(0.5, thickness / 2)
+        box = (x1, y - half, x2, y + half)
+        radius = half if thickness >= 3 else 0
+        ImageDraw.Draw(self.card).rounded_rectangle(box, radius=radius, fill=self.color(track_key, track_alpha))
+        ImageDraw.Draw(self.played_layer()).rounded_rectangle(box, radius=radius, fill=self.color(accent_key, accent_alpha))
+        self._progress_span(x1, x2)
+
+    def _progress_span(self, x1: float, x2: float) -> None:
+        if self.progress is None:
+            self.progress = (x1, x2)
+        else:
+            self.progress = (min(self.progress[0], x1), max(self.progress[1], x2))
+
+    def dot_knob(self, x: float, y: float, radius: float, color_key: str = "accent_color") -> None:
+        if not self.flags["knob"]:
+            return
+        layer = self.knob_layer()
+        glow = _blank(self.width, self.height)
+        ImageDraw.Draw(glow).ellipse((x - radius * 2, y - radius * 2, x + radius * 2, y + radius * 2), fill=self.color(color_key, 70))
+        layer.alpha_composite(glow.filter(ImageFilter.GaussianBlur(max(1, radius * 0.8))))
+        ImageDraw.Draw(layer).ellipse((x - radius, y - radius, x + radius, y + radius), fill=self.color(color_key, 255))
+
+    def bar_knob(self, x: float, top: float, bottom: float, thickness: float) -> None:
+        if not self.flags["knob"]:
+            return
+        layer = self.knob_layer()
+        half = max(1.0, thickness / 2)
+        glow = _blank(self.width, self.height)
+        ImageDraw.Draw(glow).rounded_rectangle((x - half * 3, top, x + half * 3, bottom), radius=half * 3, fill=self.color("accent_color", 90))
+        layer.alpha_composite(glow.filter(ImageFilter.GaussianBlur(max(1, half * 2))))
+        ImageDraw.Draw(layer).rounded_rectangle((x - half, top, x + half, bottom), radius=half, fill=self.color("primary_text_color", 255))
+
+    # time readouts -----------------------------------------------------------------------
+    def time_font(self) -> tuple[str, str, float]:
+        family = str(self.design.get("time_font_family") or "Segoe UI")
+        style = "Bold" if self.design.get("time_bold") else "Regular"
+        return family, style, float(self.sz(float(self.design.get("meta_size", 15))))
+
+    def time_width(self, sample: str) -> float:
+        family, style, size = self.time_font()
+        font = _font(int(size), family, style == "Bold")
+        return ImageDraw.Draw(self.card).textlength(sample, font=font)
+
+    def readout(self, kind: str, x: float, y: float, align: str, color: tuple[int, int, int, int]) -> None:
+        family, style, size = self.time_font()
+        self.texts.append(TextSpec(kind=kind, x=float(x), y=float(y), align=align, font=family, style=style, size_px=size, color=color))
+
+    def time_row(self, left: float, right: float, y: float, color: tuple[int, int, int, int], *, single_align: str = "right") -> tuple[float, float]:
+        """Place readouts for the configured time mode; return the free span between them."""
+        if not self.flags["time"]:
+            return left, right
+        mode = self.design.get("time_mode")
+        gap = self.sz(14)
+        sample_single = {"elapsed_total": "00:00:00 / 00:00:00", "elapsed": "00:00:00", "remaining": "-00:00:00"}
+        if mode == "split":
+            self.readout("elapsed", left, y, "left", color)
+            self.readout("total", right, y, "right", color)
+            width = self.time_width("00:00:00")
+            return left + width + gap, right - width - gap
+        sample = sample_single.get(str(mode), "00:00:00")
+        if single_align == "left":
+            self.readout(str(mode), left, y, "left", color)
+            return left + self.time_width(sample) + gap, right
+        if single_align == "center":
+            self.readout(str(mode), (left + right) / 2, y, "center", color)
+            return left, right
+        self.readout(str(mode), right, y, "right", color)
+        return left, right - self.time_width(sample) - gap
+
+    # result ------------------------------------------------------------------------------
+    def result(self) -> PlayerLayers:
+        x1, x2 = self.progress if self.progress else (0.0, 0.0)
+        return PlayerLayers(
+            card=self.card,
+            played=self.played,
+            knob=self.knob,
+            progress_x1=float(x1),
+            progress_x2=float(x2),
+            texts=list(self.texts),
+            bounds=(self.x, self.y, self.w, self.h),
+        )
+
+
+# --------------------------------------------------------------------------------------------
+# Skins. Coordinates are in base-size units (see SKIN_BASE_SIZES) relative to the player box.
+
+
+def _paint_classic(p: _Painter) -> None:
+    d = p.design
+    pad = 4
+    card_w, card_h = 640 - pad * 2, 160 - pad * 2
+    radius = p.s * float(d["corner_radius"])
+    p.panel((p.px(pad), p.py(pad), p.px(pad + card_w) - 1, p.py(pad + card_h) - 1), radius)
+    if p.flags["cover"]:
+        cover = card_h - 32
+        p.cover(p.px(pad + 14), p.py(pad + 16), p.s * cover, p.s * 8)
+        text_x = p.px(pad + 14 + cover + 22)
+    else:
+        text_x = p.px(pad + 26)
+    text_right = p.px(pad + card_w - 22)
+    p.brand(text_right, p.py(pad + 14))
+    brand_reserve = p.sz(120) if p.flags["brand"] else 0
+    if p.flags["artist"]:
+        p.text(text_x, p.py(pad + 22), p.artist_text(), p.font("artist_size", "artist_font_family"), p.color("secondary_text_color", 226), text_right - text_x - brand_reserve)
+    if p.flags["title"]:
+        p.text(text_x, p.py(pad + 44), p.info.title, p.font("title_size", "title_font_family"), p.color("primary_text_color"), text_right - text_x)
+    row_y = p.py(pad + 112)
+    free_left, free_right = p.time_row(text_x, text_right, row_y, p.color("secondary_text_color", 225))
+    if p.flags["bars"]:
+        p.bars(free_left, free_right, p.py(pad + 120), p.s * 30, mode="up", width_ratio=0.36, reflection=0.32, min_pitch=5)
+    if p.flags["progress"]:
+        line_y = p.py(pad + card_h - 9)
+        p.line(text_x, text_right, line_y, max(1.0, p.s * 2))
+        p.dot_knob(text_x, line_y, p.s * 4)
+
+
+def _minimal_timer_box(p: _Painter) -> tuple[float, float, float, float]:
+    timer_w = 352 * p.s
+    timer_h = 84 * p.s
+    anchor = str(p.design.get("anchor"))
+    right_side = not anchor.endswith("right")
+    top_side = anchor.startswith("top")
+    x = p.width - timer_w if right_side else 0
+    y = 0 if top_side else p.height - timer_h
+    return x, y, x + timer_w, y + timer_h
+
+
+def _paint_minimal(p: _Painter) -> None:
+    d = p.design
+    timer = _minimal_timer_box(p) if (p.flags["time"] or p.flags["progress"]) else None
+    card_left, card_top = p.px(0), p.py(0)
+    card_right, card_bottom = p.px(640) - 1, p.py(176) - 1
+    gap = p.sz(24)
+    if timer and timer[1] < card_bottom and timer[3] > card_top:
+        if timer[0] >= card_left:
+            card_right = min(card_right, timer[0] - gap)
+        else:
+            card_left = max(card_left, timer[2] + gap)
+    radius = p.s * float(d["corner_radius"])
+    if card_right - card_left > p.sz(40):
+        p.panel((card_left, card_top, card_right, card_bottom), radius, shadow=0, glass=False, outline_key="secondary_text_color")
+        ImageDraw.Draw(p.card).rectangle((card_left, card_top, card_left + max(2, p.sz(7)), card_bottom), fill=p.color("secondary_text_color"))
+        text_x = card_left + p.sz(24)
+        max_w = card_right - text_x - p.sz(20)
+        if p.flags["artist"]:
+            p.text(text_x, card_top + p.sz(42), p.artist_text(), p.font("artist_size", "artist_font_family"), p.color("secondary_text_color"), max_w)
+        if p.flags["title"]:
+            p.text(text_x, card_top + p.sz(72), p.info.title.upper(), p.font("title_size", "title_font_family"), p.color("primary_text_color"), max_w)
+    if timer:
+        x1, y1, x2, y2 = timer
+        ImageDraw.Draw(p.card).rectangle((x1, y1, x2 - 1, y2 - 1), fill=p.color("primary_text_color"))
+        pad = p.sz(20)
+        p.time_row(x1 + pad, x2 - pad, (y1 + y2) / 2, p.color("panel_color"))
+        if p.flags["progress"]:
+            p.line(x1, x2, y2 - p.sz(3), max(2.0, p.s * 4), track_key="panel_color", track_alpha=60, accent_key="panel_color", accent_alpha=255)
+
+
+def _paint_portrait_glass(p: _Painter) -> None:
+    d = p.design
+    pad = 4
+    card_w, card_h = 420 - pad * 2, 640 - pad * 2
+    radius = p.s * float(d["corner_radius"])
+    p.panel((p.px(pad), p.py(pad), p.px(pad + card_w) - 1, p.py(pad + card_h) - 1), radius, shadow=104)
+    inner = 24
+    text_x = p.px(pad + inner)
+    text_right = p.px(pad + card_w - inner)
+    cover = card_w - inner * 2
+    if p.flags["cover"]:
+        p.cover(p.px(pad + inner), p.py(pad + inner), p.s * cover, p.s * 14)
+        info_top = pad + inner + cover
+    else:
+        info_top = pad + 180
+    if p.flags["artist"]:
+        p.text(text_x, p.py(info_top + 20), p.artist_text(), p.font("artist_size", "artist_font_family"), p.color("secondary_text_color", 226), text_right - text_x)
+    if p.flags["title"]:
+        p.text(text_x, p.py(info_top + 46), p.info.title, p.font("title_size", "title_font_family"), p.color("primary_text_color"), text_right - text_x)
+    line_y = p.py(pad + card_h - 30)
+    if p.flags["bars"]:
+        p.bars(text_x, text_right, p.py(pad + card_h - 74), p.s * 40, mode="up", width_ratio=0.5, reflection=0.0, min_pitch=5)
+    if p.flags["progress"]:
+        p.line(text_x, text_right, line_y, max(2.0, p.s * 3))
+        p.dot_knob(text_x, line_y, p.s * 5)
+    p.time_row(text_x, text_right, line_y - p.sz(22) if p.flags["progress"] else line_y, p.color("secondary_text_color", 225))
+
+
+def _paint_compact(p: _Painter) -> None:
+    d = p.design
+    radius = min(p.s * float(d["corner_radius"]), p.h / 2)
+    p.panel((p.px(0), p.py(0), p.px(600) - 1, p.py(96) - 1), radius, shadow=110, glass=False)
+    if p.flags["cover"]:
+        size = 68
+        cover_radius = min(p.s * float(d["corner_radius"]) * 0.7, p.s * size / 2)
+        p.cover(p.px(14), p.py(14), p.s * size, cover_radius)
+        text_x = p.px(14 + size + 16)
+    else:
+        text_x = p.px(30)
+    right = p.px(600 - 30)
+    color = p.color("secondary_text_color", 225)
+    title_right = right
+    if p.flags["time"] and d.get("time_mode") != "split":
+        title_right = p.time_row(text_x, right, p.py(30), color)[1]
+    if p.flags["title"]:
+        p.text(text_x, p.py(14), p.info.title, p.font("title_size", "title_font_family"), p.color("primary_text_color"), title_right - text_x)
+    if p.flags["artist"]:
+        p.text(text_x, p.py(44), p.artist_text(), p.font("artist_size", "artist_font_family"), color, title_right - text_x)
+    line_y = p.py(78)
+    left, line_right = text_x, right
+    if p.flags["time"] and d.get("time_mode") == "split":
+        left, line_right = p.time_row(text_x, right, line_y, color)
+    if p.flags["progress"]:
+        p.line(left, line_right, line_y, max(2.0, p.s * 3))
+        p.dot_knob(left, line_y, p.s * 5.5)
+
+
+def _paint_wave(p: _Painter) -> None:
+    d = p.design
+    pad = 4
+    card_w, card_h = 720 - pad * 2, 208 - pad * 2
+    radius = p.s * float(d["corner_radius"])
+    p.panel((p.px(pad), p.py(pad), p.px(pad + card_w) - 1, p.py(pad + card_h) - 1), radius, shadow=110)
+    if p.flags["cover"]:
+        size = 128
+        p.cover(p.px(pad + 20), p.py(pad + 20), p.s * size, p.s * 12)
+        text_x = p.px(pad + 20 + size + 24)
+    else:
+        text_x = p.px(pad + 28)
+    text_right = p.px(pad + card_w - 24)
+    p.brand(text_right, p.py(pad + 20))
+    brand_reserve = p.sz(120) if p.flags["brand"] else 0
+    if p.flags["artist"]:
+        p.text(text_x, p.py(pad + 24), p.artist_text(), p.font("artist_size", "artist_font_family"), p.color("secondary_text_color", 226), text_right - text_x - brand_reserve)
+    if p.flags["title"]:
+        p.text(text_x, p.py(pad + 46), p.info.title, p.font("title_size", "title_font_family"), p.color("primary_text_color"), text_right - text_x)
+    centre = p.py(pad + 128)
+    half = p.s * 30
+    if p.flags["bars"]:
+        p.bars(text_x, text_right, centre, half * 2, mode="mirror", width_ratio=0.55, min_pitch=4)
+        p.bar_knob(text_x, centre - half - p.sz(6), centre + half + p.sz(6), max(2.0, p.s * 3))
+    p.time_row(text_x, text_right, p.py(pad + 180), p.color("secondary_text_color", 225))
+
+
+_PAINTERS = {
+    "classic": _paint_classic,
+    "minimal": _paint_minimal,
+    "portrait_glass": _paint_portrait_glass,
+    "compact": _paint_compact,
+    "wave": _paint_wave,
+}
+
+
+def compose_player(
+    info: TrackInfo,
+    levels: Sequence[float] | None,
+    design: Mapping[str, Any] | None,
+    skin: str,
+    width: int,
+    height: int,
+) -> PlayerLayers:
+    if width <= 0 or height <= 0 or width > 8192 or height > 8192:
+        raise ValueError(f"Unsupported frame size {width}x{height}")
+    normalized = normalize_design(design, skin)
+    painter = _Painter(int(width), int(height), normalized, skin, info, levels)
+    _PAINTERS[skin](painter)
+    return painter.result()
+
+
+def render_track_layers(
+    info: TrackInfo,
+    levels: Sequence[float] | None,
+    design: Mapping[str, Any] | None,
+    skin: str,
+    width: int,
+    height: int,
+    out_dir: str | Path,
+    stem: str,
+) -> tuple[PlayerLayers, dict[str, str | None]]:
+    """Render the layers of one player and write them as PNG files next to each other."""
+    layers = compose_player(info, levels, design, skin, width, height)
+    directory = Path(out_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    paths: dict[str, str | None] = {"card": None, "played": None, "knob": None}
+    for name, image in (("card", layers.card), ("played", layers.played), ("knob", layers.knob)):
+        if image is None:
+            continue
+        target = directory / f"{stem}_{name}.png"
+        temporary = target.with_name(f"{target.stem}.tmp{os.getpid()}.png")
+        image.save(temporary, format="PNG", compress_level=6)
+        os.replace(temporary, target)
+        paths[name] = str(target)
+    return layers, paths
+
+
+# --------------------------------------------------------------------------------------------
+# Previews
+
+
+def _draw_readout(image: Image.Image, spec: TextSpec, text: str) -> None:
+    draw = ImageDraw.Draw(image)
+    font = _font(int(round(spec.size_px)), spec.font, spec.style.lower() == "bold")
+    text = _safe_text(draw, text, font)
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font, anchor="ls")
+    if spec.align == "right":
+        x = spec.x - right
+    elif spec.align == "center":
+        x = spec.x - (left + right) / 2
+    else:
+        x = spec.x - left
+    y = spec.y - (top + bottom) / 2
+    draw.text((x, y), text, font=font, fill=tuple(spec.color), anchor="ls")
+
+
+def readout_text(kind: str, elapsed: float, total: float) -> str:
+    with_hours = total >= 3600
+    elapsed = max(0.0, min(total, elapsed))
+    if kind == "total":
+        return format_clock(total, with_hours)
+    if kind == "remaining":
+        return "-" + format_clock(math.ceil(total - elapsed), with_hours)
+    if kind == "elapsed_total":
+        return f"{format_clock(elapsed, with_hours)} / {format_clock(total, with_hours)}"
+    return format_clock(elapsed, with_hours)
+
+
+def flatten_player(layers: PlayerLayers, progress: float, elapsed: float, total: float) -> Image.Image:
+    """Composite the layers as Fusion would at ``progress`` (0..1)."""
+    progress = max(0.0, min(1.0, progress))
+    frame = layers.card.copy()
+    span = layers.progress_x2 - layers.progress_x1
+    if layers.played is not None and span > 0:
+        reveal = int(round(layers.progress_x1 + span * progress))
+        if reveal > 0:
+            mask = Image.new("L", frame.size, 0)
+            ImageDraw.Draw(mask).rectangle((0, 0, reveal - 1, frame.height), fill=255)
+            played = layers.played.copy()
+            played.putalpha(ImageChops.multiply(played.getchannel("A"), mask))
+            frame.alpha_composite(played)
+    if layers.knob is not None:
+        offset = int(round(span * progress))
+        moved = _blank(*frame.size)
+        moved.alpha_composite(layers.knob.crop((0, 0, frame.width - offset, frame.height)), (offset, 0))
+        frame.alpha_composite(moved)
+    for spec in layers.texts:
+        _draw_readout(frame, spec, readout_text(spec.kind, elapsed, total))
     return frame
 
 
 def _preview_background(size: tuple[int, int]) -> Image.Image:
     width, height = size
-    background = Image.new("RGBA", size, (27, 30, 36, 255))
-    draw = ImageDraw.Draw(background)
-    cell = max(16, min(width, height) // 10)
-    for y in range(0, height, cell):
-        for x in range(0, width, cell):
-            fill = (34, 38, 45, 255) if ((x // cell) + (y // cell)) % 2 == 0 else (24, 27, 33, 255)
-            draw.rectangle((x, y, min(width, x + cell), min(height, y + cell)), fill=fill)
+    top = (38, 44, 56)
+    bottom = (14, 16, 22)
+    gradient = Image.new("RGB", (1, 256))
+    for row in range(256):
+        t = row / 255
+        gradient.putpixel((0, row), tuple(int(top[i] * (1 - t) + bottom[i] * t) for i in range(3)))
+    background = gradient.resize((width, height), Image.Resampling.BILINEAR).convert("RGBA")
+    glow = _blank(width, height)
+    ImageDraw.Draw(glow).ellipse((width * 0.55, -height * 0.4, width * 1.25, height * 0.7), fill=(120, 140, 200, 46))
+    background.alpha_composite(glow.filter(ImageFilter.GaussianBlur(max(4, width // 12))))
     return background
 
 
-def render_style_preview(
+def render_preview(
     output_path: str | Path,
-    settings: RenderSettings,
+    design: Mapping[str, Any] | None,
+    skin: str,
+    *,
+    frame_width: int = 1920,
+    frame_height: int = 1080,
+    preview_width: int = 640,
     title: str = "Track Title Preview",
     artist: str = "Artist Name",
     duration: float = 225.0,
     progress: float = 0.36,
     cover_path: str | None = None,
+    crop: bool = False,
 ) -> Path:
-    target = Path(output_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    preview_settings = RenderSettings(
-        width=settings.width if settings.bake_position else settings.player_width or settings.width,
-        height=settings.height if settings.bake_position else settings.player_height or settings.height,
-        fps=1,
-        bars=0,
-        codec=settings.codec,
-        design=settings.design,
-        player_width=settings.player_width if settings.bake_position else None,
-        player_height=settings.player_height if settings.bake_position else None,
-        margin=settings.margin if settings.bake_position else 0,
-        bake_position=settings.bake_position,
-        skin=settings.skin,
-    )
-    metadata = TrackMetadata(
-        source_path="preview",
-        title=title,
-        artist=artist,
-        album="Preview",
-        duration=max(1.0, float(duration)),
-        cover_path=cover_path,
-    )
-    current_time = metadata.duration * max(0.0, min(1.0, float(progress)))
-    player = draw_frame(metadata, [], current_time, preview_settings)
+    """Render the player over a neutral background, the whole frame or cropped to the player."""
+    info = TrackInfo(title=title, artist=artist, cover_path=cover_path)
+    layers = compose_player(info, None, design, skin, frame_width, frame_height)
+    total = max(1.0, float(duration))
+    progress = max(0.0, min(1.0, float(progress)))
+    player = flatten_player(layers, progress, total * progress, total)
     frame = _preview_background(player.size)
     frame.alpha_composite(player)
+    if crop:
+        x, y, w, h = layers.bounds
+        margin = int(min(frame_width, frame_height) * 0.04)
+        box = (max(0, x - margin), max(0, y - margin), min(frame_width, x + w + margin), min(frame_height, y + h + margin))
+        if skin == "minimal":
+            box = (0, box[1], frame_width, frame_height) if box[1] > frame_height / 3 else (0, 0, frame_width, box[3])
+        frame = frame.crop(box)
+    if preview_width and frame.width > preview_width:
+        ratio = preview_width / frame.width
+        frame = frame.resize((preview_width, max(1, int(round(frame.height * ratio)))), Image.Resampling.LANCZOS)
+    target = Path(output_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
     frame.convert("RGB").save(target)
     return target
-
-
-def render_overlay(
-    metadata: TrackMetadata,
-    levels: list[float],
-    output_dir: str | Path,
-    settings: RenderSettings,
-    ffmpeg: str = "ffmpeg",
-    output_stem: str | None = None,
-    job_id: str | None = None,
-    record_frame: int | None = None,
-    source_start_time: float | None = None,
-    timeline_item_name: str | None = None,
-    frame_count_override: int | None = None,
-    progress_callback=None,
-) -> RenderedTrack:
-    output = Path(output_dir)
-    output.mkdir(parents=True, exist_ok=True)
-    stem = safe_stem(output_stem or f"{metadata.artist}_{metadata.title}")
-    target = output / f"{stem}_overlay.mov"
-    frame_count = frame_count_override or max(1, int(math.ceil(metadata.duration * settings.fps)))
-
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-f",
-        "rawvideo",
-        "-pix_fmt",
-        "rgba",
-        "-s",
-        f"{settings.width}x{settings.height}",
-        "-r",
-        str(settings.fps),
-        "-i",
-        "pipe:0",
-        "-an",
-    ]
-    if settings.codec == "prores4444":
-        cmd.extend(["-c:v", "prores_ks", "-profile:v", "4", "-pix_fmt", "yuva444p10le"])
-    else:
-        cmd.extend(["-c:v", "qtrle", "-pix_fmt", "argb"])
-    cmd.append(str(target))
-
-    process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=_creationflags())
-    assert process.stdin is not None
-    progress_step = max(1, frame_count // 20)
-    base_frame = Image.new("RGBA", (settings.width, settings.height), (0, 0, 0, 0))
-    _draw_card_static(base_frame, metadata, settings)
-    try:
-        for frame_idx in range(frame_count):
-            current_time = min(metadata.duration, frame_idx / float(settings.fps))
-            frame = base_frame.copy()
-            _draw_card_dynamic(frame, metadata, current_time, settings)
-            process.stdin.write(frame.tobytes("raw", "RGBA"))
-            done = frame_idx + 1
-            if progress_callback and (done == 1 or done == frame_count or done % progress_step == 0):
-                progress_callback(done, frame_count)
-    finally:
-        process.stdin.close()
-    stderr = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
-    code = process.wait()
-    if code != 0:
-        raise RuntimeError(f"ffmpeg failed while rendering {target}: {stderr}")
-
-    return RenderedTrack(
-        source_path=metadata.source_path,
-        overlay_path=str(target),
-        title=metadata.title,
-        artist=metadata.artist,
-        album=metadata.album,
-        duration=metadata.duration,
-        cover_path=metadata.cover_path,
-        frame_count=frame_count,
-        job_id=job_id,
-        record_frame=record_frame,
-        source_start_time=source_start_time,
-        timeline_item_name=timeline_item_name,
-    )

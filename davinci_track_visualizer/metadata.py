@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import os
+import threading
 import json
 import re
 import subprocess
@@ -61,6 +64,18 @@ def _first_text(tags: Any, keys: list[str]) -> str:
     return ""
 
 
+def join_artists(text: str) -> str:
+    """ID3v2.3 stores several artists as ``A/B/C``; show them as ``A, B, C``.
+
+    Names such as ``AC/DC`` keep their slash: only split when every part is a
+    plausible standalone name (three or more characters).
+    """
+    parts = [part.strip() for part in text.split("/")]
+    if len(parts) > 1 and all(len(part) >= 3 for part in parts):
+        return ", ".join(parts)
+    return text
+
+
 def _cover_from_tags(audio: Any) -> tuple[bytes, str] | tuple[None, None]:
     if audio is None:
         return None, None
@@ -105,8 +120,12 @@ def _save_cover(data: bytes, assets_dir: Path, stem: str) -> str | None:
         image = Image.open(BytesIO(data)).convert("RGBA")
     except Exception:
         return None
-    target = assets_dir / f"{safe_stem(stem)}_cover.png"
-    image.save(target)
+    target = assets_dir / f"{safe_stem(stem)[:60]}_cover.png"
+    if target.is_file() and target.stat().st_size > 0:
+        return str(target)
+    temporary = target.with_name(f"{target.stem}.tmp{os.getpid()}_{threading.get_ident()}.png")
+    image.save(temporary)
+    os.replace(temporary, target)
     return str(target)
 
 
@@ -159,6 +178,7 @@ def read_track_metadata(
 
     if not title:
         title = source.stem
+    artist = join_artists(artist)
     if not artist:
         artist = "Unknown Artist"
 
@@ -170,7 +190,8 @@ def read_track_metadata(
             duration = 0.0
 
     cover_data, _ = _cover_from_tags(audio)
-    cover_path = _save_cover(cover_data, Path(assets_dir), source.stem) if cover_data else None
+    cover_key = hashlib.sha256(cover_data).hexdigest()[:16] if cover_data else ""
+    cover_path = _save_cover(cover_data, Path(assets_dir), f"{source.stem[:40]}_{cover_key}") if cover_data else None
 
     return TrackMetadata(
         source_path=str(source),

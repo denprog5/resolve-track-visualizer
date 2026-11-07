@@ -4,7 +4,7 @@ Resolve Track Visualizer relies on the Resolve scripting API, UIManager, Media P
 
 | Environment | Status | Notes |
 | --- | --- | --- |
-| DaVinci Resolve Studio 20.2.1, Windows x64 | Verified | UI, 49-track production probe, helper sharding, three skins, project save/reload, and installed runtime tested. |
+| DaVinci Resolve Studio 20.2.1, Windows x64 | Verified | Redesigned panel in Russian and English, five skins, palette and preset workflow, 48-clip overlapping mix placement, project save/reload, panel relaunch. Tested with a development install; the packaged installer has not been re-run since the redesign. |
 | DaVinci Resolve Free 20/21 | Not supported by the current UI | Blackmagic restricts the UIManager interface used by this plugin to Resolve Studio. Free support requires a separate UI architecture. |
 | DaVinci Resolve 20 versions older than 20.2.1 | Not supported yet | No compatibility claim until host probes pass on the exact version. |
 | DaVinci Resolve 21 | Testing deferred | Resolve 21 validation is outside the current release scope; no compatibility claim is made. |
@@ -14,4 +14,4 @@ Resolve Track Visualizer relies on the Resolve scripting API, UIManager, Media P
 
 Only DaVinci Resolve Studio 20.2.1 on Windows x64 is currently verified. A successful unit test, Lua parse, or PyInstaller build does not change this matrix.
 
-For a new supported host, run the UI localization probe in English and Russian, the live Fusion host probe, and the 49-track production/reload probe before updating this document.
+For a new supported host, create players in a disposable project on a short timeline and on a long overlapping mix (48+ clips across two or more audio tracks), check exported stills against the expected time readouts, save and reload the project, and check the panel in English and Russian before updating this document.

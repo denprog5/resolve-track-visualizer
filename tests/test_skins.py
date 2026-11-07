@@ -4,235 +4,185 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image, ImageChops
+from PIL import Image
 
-from davinci_track_visualizer.metadata import TrackMetadata
 from davinci_track_visualizer.render import (
+    TrackInfo,
+    compose_player,
+    flatten_player,
+    player_bounds,
+    readout_text,
+    render_preview,
+    render_track_layers,
+    sample_levels,
+)
+from davinci_track_visualizer.skins import (
+    ANCHORS,
+    COLOR_KEYS,
+    DEFAULT_PALETTES,
+    INT_RANGES,
+    PALETTE_KEYS,
+    PALETTES,
+    SKIN_BASE_SIZES,
+    SKIN_FEATURES,
     SUPPORTED_SKINS,
-    RenderSettings,
-    _dynamic_spec,
-    _effective_design,
-    _layout,
-    draw_frame,
-    render_live_carrier,
-    render_style_preview,
+    catalog,
+    check_skin,
+    default_design,
+    effective_flags,
+    normalize_color,
+    normalize_design,
 )
 
+INFO = TrackInfo(title="Песня / Song", artist="Исполнитель", cover_path=None)
 
-class SkinRendererTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.metadata = TrackMetadata(
-            source_path="synthetic.wav",
-            title="A Long Track Title",
-            artist="Artist Name",
-            album="Album",
-            duration=245.8,
-            cover_path=None,
-        )
 
-    def _settings(self, skin: str, scale: int = 1) -> RenderSettings:
-        dimensions = {
-            "classic": (640, 160),
-            "minimal": (640, 176),
-            "portrait_glass": (420, 640),
-        }
-        player_width, player_height = dimensions[skin]
-        return RenderSettings(
-            width=1920 * scale,
-            height=1080 * scale,
-            design={"glass_enabled": False},
-            player_width=player_width * scale,
-            player_height=player_height * scale,
-            margin=48 * scale,
-            bake_position=True,
-            skin=skin,
-        )
-
-    def _assert_geometry_in_bounds(self, spec: dict) -> None:
-        width = spec["canvas"]["width"]
-        height = spec["canvas"]["height"]
-        player = spec["player"]
-        self.assertGreaterEqual(player["x"], 0)
-        self.assertGreaterEqual(player["y"], 0)
-        self.assertLessEqual(player["x"] + player["width"], width)
-        self.assertLessEqual(player["y"] + player["height"], height)
-        self.assertGreaterEqual(player["card_x"], 0)
-        self.assertGreaterEqual(player["card_y"], 0)
-        self.assertLessEqual(player["card_x"] + player["card_width"], width)
-        self.assertLessEqual(player["card_y"] + player["card_height"], height)
-
-        time_box = spec["time"]["box"]
-        self.assertGreater(time_box["width"], 0)
-        self.assertGreater(time_box["height"], 0)
-        self.assertGreaterEqual(time_box["x"], 0)
-        self.assertGreaterEqual(time_box["y"], 0)
-        self.assertLessEqual(time_box["x"] + time_box["width"], width)
-        self.assertLessEqual(time_box["y"] + time_box["height"], height)
-        self.assertEqual(spec["time"]["x"], time_box["x"] + time_box["width"])
-        self.assertEqual(spec["time"]["y"], time_box["y"] + time_box["height"] / 2.0)
-
-        progress = spec["progress"]
-        self.assertGreaterEqual(progress["x1"], 0)
-        self.assertLess(progress["x1"], progress["x2"])
-        self.assertLessEqual(progress["x2"], width)
-        self.assertGreaterEqual(progress["y"], 0)
-        self.assertLess(progress["y"], height)
-
+class SkinCatalogTests(unittest.TestCase):
     def test_supported_skins_are_strict(self) -> None:
-        self.assertEqual(SUPPORTED_SKINS, ("classic", "minimal", "portrait_glass"))
-        with self.assertRaisesRegex(ValueError, "Unsupported skin"):
-            RenderSettings(skin="unknown")
-
-    def test_structural_fields_are_enforced_per_skin(self) -> None:
-        contradictory = {
-            "show_cover": False,
-            "show_brand": True,
-            "show_time": False,
-            "show_progress": False,
-            "show_knob": True,
-            "glass_enabled": False,
-        }
-        portrait = RenderSettings(skin="portrait_glass", design=contradictory)
-        portrait_design = _effective_design(portrait)
-        self.assertTrue(portrait_design["show_cover"])
-        self.assertFalse(portrait_design["show_brand"])
-        self.assertTrue(portrait_design["show_time"])
-        self.assertTrue(portrait_design["show_progress"])
-        self.assertFalse(portrait_design["show_knob"])
-        self.assertTrue(portrait_design["glass_enabled"])
-
-        minimal = RenderSettings(
-            skin="minimal",
-            design={key: not value if isinstance(value, bool) else value for key, value in contradictory.items()},
-        )
-        minimal_design = _effective_design(minimal)
-        self.assertFalse(minimal_design["show_cover"])
-        self.assertFalse(minimal_design["show_brand"])
-        self.assertTrue(minimal_design["show_time"])
-        self.assertFalse(minimal_design["show_progress"])
-        self.assertFalse(minimal_design["show_knob"])
-        self.assertFalse(minimal_design["glass_enabled"])
-
-    def test_semantic_color_mapping(self) -> None:
-        colors = {
-            "panel_color": "#102030",
-            "secondary_text_color": "#405060",
-            "primary_text_color": "#708090",
-            "border_color": "#A0B0C0",
-            "accent_color": "#D0E0F0",
-            "track_color": "#112233",
-        }
-        minimal = self._settings("minimal")
-        minimal.design.update(colors)
-        minimal_spec = _dynamic_spec(self.metadata, minimal)
-        self.assertEqual(minimal_spec["time"]["color"], [16, 32, 48])
-        self.assertFalse(minimal_spec["show_progress"])
-        layout = _layout(minimal, _effective_design(minimal))
-        static = Image.new("RGBA", (minimal.width, minimal.height), (0, 0, 0, 0))
-        with tempfile.TemporaryDirectory() as temporary_dir:
-            path, _ = render_live_carrier(self.metadata, Path(temporary_dir) / "minimal.png", minimal)
-            with Image.open(path) as rendered:
-                static = rendered.copy()
-        timer_center = (
-            int(layout["timer_x"]) + int(layout["timer_w"]) // 2,
-            int(layout["timer_y"]) + int(layout["timer_h"]) // 2,
-        )
-        self.assertEqual(static.getpixel(timer_center), (112, 128, 144, 255))
-
-        portrait = self._settings("portrait_glass")
-        portrait.design.update(colors)
-        portrait_spec = _dynamic_spec(self.metadata, portrait)
-        self.assertEqual(portrait_spec["time"]["color"], [64, 80, 96])
-        self.assertEqual(portrait_spec["progress"]["accent_color"], [208, 224, 240])
-        self.assertEqual(portrait_spec["progress"]["track_color"], [17, 34, 51])
-
-    def test_resolved_1080_and_4k_geometry_scales_exactly_and_stays_in_bounds(self) -> None:
         for skin in SUPPORTED_SKINS:
-            with self.subTest(skin=skin):
-                low = _dynamic_spec(self.metadata, self._settings(skin, 1))
-                high = _dynamic_spec(self.metadata, self._settings(skin, 2))
-                self._assert_geometry_in_bounds(low)
-                self._assert_geometry_in_bounds(high)
-                self.assertEqual(high["player"]["width"], low["player"]["width"] * 2)
-                self.assertEqual(high["player"]["height"], low["player"]["height"] * 2)
-                self.assertEqual(high["player"]["x"], low["player"]["x"] * 2)
-                self.assertEqual(high["player"]["y"], low["player"]["y"] * 2)
-                for field in ("x", "y", "width", "height"):
-                    self.assertEqual(high["time"]["box"][field], low["time"]["box"][field] * 2)
+            self.assertEqual(check_skin(skin), skin)
+        for bad in ("Classic", "", None, "legacy"):
+            with self.assertRaises(ValueError):
+                check_skin(bad)
 
-    def test_live_static_and_legacy_dynamic_layers_share_geometry(self) -> None:
+    def test_every_skin_has_size_features_and_palette(self) -> None:
         for skin in SUPPORTED_SKINS:
-            with self.subTest(skin=skin), tempfile.TemporaryDirectory() as temporary_dir:
-                settings = self._settings(skin)
-                static_path, live_spec = render_live_carrier(
-                    self.metadata,
-                    Path(temporary_dir) / f"{skin}.png",
-                    settings,
-                )
-                self.assertEqual(live_spec, _dynamic_spec(self.metadata, settings))
-                with Image.open(static_path) as image:
-                    static = image.copy()
-                at_start = draw_frame(self.metadata, [], 0.0, settings)
-                midway = draw_frame(self.metadata, [], self.metadata.duration / 2.0, settings)
-                self.assertIsNotNone(ImageChops.difference(static.convert("RGB"), at_start.convert("RGB")).getbbox())
-                self.assertIsNotNone(ImageChops.difference(at_start.convert("RGB"), midway.convert("RGB")).getbbox())
+            self.assertIn(skin, SKIN_BASE_SIZES)
+            self.assertIn(skin, SKIN_FEATURES)
+            self.assertIn(DEFAULT_PALETTES[skin], PALETTES)
 
-    def test_classic_default_preserves_1080_layout_and_explicit_skin_output(self) -> None:
-        design = {"show_cover": False, "show_brand": False, "glass_enabled": False}
-        implicit = RenderSettings(
-            width=1920,
-            height=1080,
-            design=design,
-            player_width=640,
-            player_height=160,
-            margin=48,
-            bake_position=True,
-        )
-        explicit = RenderSettings(
-            width=1920,
-            height=1080,
-            design=design,
-            player_width=640,
-            player_height=160,
-            margin=48,
-            bake_position=True,
-            skin="classic",
-        )
-        spec = _dynamic_spec(self.metadata, implicit)
-        self.assertEqual(
-            spec["player"],
+    def test_default_design_uses_the_skin_palette(self) -> None:
+        for skin in SUPPORTED_SKINS:
+            design = default_design(skin)
+            palette = PALETTES[DEFAULT_PALETTES[skin]]
+            for key in PALETTE_KEYS:
+                self.assertEqual(design[key], palette[key], f"{skin}.{key}")
+
+    def test_palettes_define_every_palette_key(self) -> None:
+        for name, palette in PALETTES.items():
+            self.assertEqual(set(palette), set(PALETTE_KEYS), name)
+            for key in COLOR_KEYS:
+                if key in palette:
+                    self.assertRegex(palette[key], r"^#[0-9A-F]{6}$", f"{name}.{key}")
+
+    def test_catalog_is_json_safe_and_complete(self) -> None:
+        import json
+
+        data = json.loads(json.dumps(catalog()))
+        self.assertEqual(data["skins"], list(SUPPORTED_SKINS))
+        self.assertEqual(data["enums"]["anchor"], list(ANCHORS))
+        self.assertEqual(data["palette_order"], list(PALETTES))
+        self.assertEqual(data["int_ranges"]["scale"], list(INT_RANGES["scale"]))
+
+
+class NormalizeDesignTests(unittest.TestCase):
+    def test_colors_are_normalized_or_fall_back(self) -> None:
+        self.assertEqual(normalize_color("abc", "#000000"), "#AABBCC")
+        self.assertEqual(normalize_color("#12ab34", "#000000"), "#12AB34")
+        self.assertEqual(normalize_color("blue", "#010203"), "#010203")
+
+    def test_ranges_enums_and_booleans_are_enforced(self) -> None:
+        design = normalize_design(
             {
-                "x": 48,
-                "y": 872,
-                "width": 640,
-                "height": 160,
-                "margin": 48,
-                "bake_position": True,
-                "scale": 1.0,
-                "card_x": 52,
-                "card_y": 876,
-                "card_width": 632,
-                "card_height": 152,
+                "scale": 9999,
+                "margin_x": -5,
+                "anchor": "nowhere",
+                "show_cover": "false",
+                "show_time": 0,
+                "bar_count": "40",
+                "unknown_key": 1,
             },
+            "classic",
         )
-        self.assertEqual(spec["progress"]["x1"], 78)
-        self.assertEqual(spec["progress"]["x2"], 660)
-        self.assertEqual(spec["progress"]["y"], 1008)
-        self.assertIsNone(
-            ImageChops.difference(
-                draw_frame(self.metadata, [], 100.0, implicit),
-                draw_frame(self.metadata, [], 100.0, explicit),
-            ).getbbox()
-        )
+        self.assertEqual(design["scale"], INT_RANGES["scale"][1])
+        self.assertEqual(design["margin_x"], INT_RANGES["margin_x"][0])
+        self.assertEqual(design["anchor"], default_design("classic")["anchor"])
+        self.assertFalse(design["show_cover"])
+        self.assertFalse(design["show_time"])
+        self.assertEqual(design["bar_count"], 40)
+        self.assertNotIn("unknown_key", design)
 
-    def test_minimal_full_frame_preview_keeps_timer_in_frame_corner(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_dir:
-            settings = self._settings("minimal")
-            target = Path(temporary_dir) / "minimal_preview.png"
-            render_style_preview(target, settings, title="REACH YOUR DREAMS", artist="BRIGHT_LIGHT")
-            with Image.open(target) as preview:
-                self.assertEqual(preview.size, (1920, 1080))
-                self.assertEqual(preview.getpixel((1919, 1079)), (255, 216, 74))
+    def test_unsupported_features_are_disabled_per_skin(self) -> None:
+        everything_on = {key: True for key in ("show_cover", "show_bars", "show_progress", "show_knob", "glass_enabled")}
+        for skin in SUPPORTED_SKINS:
+            flags = effective_flags(normalize_design(everything_on, skin), skin)
+            for feature, enabled in flags.items():
+                if enabled:
+                    self.assertIn(feature, SKIN_FEATURES[skin], f"{skin}: {feature}")
+
+
+class GeometryTests(unittest.TestCase):
+    def test_bounds_scale_with_resolution_and_stay_in_frame(self) -> None:
+        for skin in SUPPORTED_SKINS:
+            for anchor in ANCHORS:
+                design = normalize_design({"anchor": anchor}, skin)
+                x, y, w, h, unit = player_bounds(design, skin, 1920, 1080)
+                x4, y4, w4, h4, unit4 = player_bounds(design, skin, 3840, 2160)
+                self.assertAlmostEqual(unit4, unit * 2)
+                self.assertAlmostEqual(w4, w * 2, delta=2)
+                self.assertAlmostEqual(h4, h * 2, delta=2)
+                for frame, box in (((1920, 1080), (x, y, w, h)), ((3840, 2160), (x4, y4, w4, h4))):
+                    self.assertGreaterEqual(box[0], 0, f"{skin}/{anchor}")
+                    self.assertGreaterEqual(box[1], 0, f"{skin}/{anchor}")
+                    self.assertLessEqual(box[0] + box[2], frame[0], f"{skin}/{anchor}")
+                    self.assertLessEqual(box[1] + box[3], frame[1], f"{skin}/{anchor}")
+
+    def test_vertical_timeline_keeps_the_player_inside(self) -> None:
+        for skin in SUPPORTED_SKINS:
+            x, y, w, h, _ = player_bounds(default_design(skin), skin, 1080, 1920)
+            self.assertLessEqual(x + w, 1080, skin)
+            self.assertLessEqual(y + h, 1920, skin)
+
+    def test_layers_are_full_frame_rgba_with_transparent_corners(self) -> None:
+        for skin in SUPPORTED_SKINS:
+            layers = compose_player(INFO, sample_levels(64), default_design(skin), skin, 960, 540)
+            self.assertEqual(layers.card.mode, "RGBA")
+            self.assertEqual(layers.card.size, (960, 540))
+            x, y, w, h = layers.bounds
+            corner = (959, 0) if x < 480 else (0, 0)
+            if y < 270:
+                corner = (corner[0], 539)
+            self.assertEqual(layers.card.getpixel(corner)[3], 0, skin)
+
+    def test_readouts_follow_time_modes(self) -> None:
+        self.assertEqual(readout_text("elapsed_total", 65, 225), "01:05 / 03:45")
+        self.assertEqual(readout_text("elapsed", 65, 225), "01:05")
+        self.assertEqual(readout_text("remaining", 65, 225), "-02:40")
+        self.assertEqual(readout_text("total", 65, 3725), "1:02:05")
+
+    def test_time_mode_none_has_no_text_readouts(self) -> None:
+        design = normalize_design({"time_mode": "none"}, "classic")
+        layers = compose_player(INFO, None, design, "classic", 1920, 1080)
+        self.assertEqual(layers.texts, [])
+
+    def test_flatten_reveals_played_layer_with_progress(self) -> None:
+        layers = compose_player(INFO, sample_levels(72), default_design("classic"), "classic", 1920, 1080)
+        start = flatten_player(layers, 0.0, 0, 200)
+        end = flatten_player(layers, 1.0, 200, 200)
+        self.assertNotEqual(start.tobytes(), end.tobytes())
+
+
+class OutputTests(unittest.TestCase):
+    def test_track_layers_are_written_atomically_with_stable_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            layers, paths = render_track_layers(INFO, sample_levels(72), default_design("wave"), "wave", 1280, 720, Path(temporary), "TVIZ_t_1")
+            self.assertEqual(Path(paths["card"]).name, "TVIZ_t_1_card.png")
+            for path in paths.values():
+                if path:
+                    with Image.open(path) as image:
+                        self.assertEqual(image.size, (1280, 720))
+            self.assertEqual([p.name for p in Path(temporary).iterdir() if ".tmp" in p.name], [])
+            self.assertLess(layers.progress_x1, layers.progress_x2)
+
+    def test_preview_full_frame_and_close_up(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            full = render_preview(Path(temporary) / "full.png", None, "classic", preview_width=640)
+            close = render_preview(Path(temporary) / "close.png", None, "classic", preview_width=640, crop=True)
+            with Image.open(full) as image:
+                self.assertEqual(image.size, (640, 360))
+            with Image.open(close) as image:
+                self.assertEqual(image.width, 640)
+                self.assertLess(image.height, 360)
 
 
 if __name__ == "__main__":

@@ -100,13 +100,10 @@ class LuaPortabilityTests(unittest.TestCase):
 
     def test_output_paths_and_path_identity_are_platform_aware(self) -> None:
         self.assertNotIn("outputs\\\\resolve", self.source)
-        self.assertGreaterEqual(
-            self.source.count('path_join(path_join(install_root(), "outputs"), "resolve")'),
-            2,
-        )
+        self.assertIn('path_join(path_join(install_root(), "outputs"), "resolve")', self.source)
         self.assertIn("if PLATFORM.windows then return value:gsub", self.source)
-        self.assertIn("local static_key = path_identity(track.static_path)", self.source)
-        self.assertIn("static_paths[path_identity(static_path)]", self.source)
+        self.assertIn("local wanted = path_identity(carrier_path)", self.source)
+        self.assertIn("path_identity(file_path) == wanted", self.source)
         self.assertIn("local target_base = path_identity(basename(clip_name))", self.source)
         self.assertIn("local file_base = path_identity(raw_base)", self.source)
 
@@ -116,7 +113,8 @@ class LuaPortabilityTests(unittest.TestCase):
         self.assertIn("if PLATFORM.windows then", self.source)
         self.assertIn("launched, launch_error = launch_runner_native(runner)", self.source)
         self.assertIn("launched, launch_error = launch_runner_posix(runner)", self.source)
-        self.assertIn("claimed = wait_for_runner_claim(task_path)", self.source)
+        self.assertIn("claimed = asynchronous or wait_for_runner_claim(task_path)", self.source)
+        self.assertIn("if os.time() > task.claim_deadline then", self.source)
         self.assertIn('tr("error.windows_wide_launch"', self.source)
         self.assertNotIn("wscript", self.source.lower())
         self.assertNotIn('CreateObject("WScript.Shell")', self.source)
@@ -176,7 +174,7 @@ class LuaPortabilityTests(unittest.TestCase):
     def test_windows_color_picker_runs_powershell_through_runner_safely(self) -> None:
         picker = self.source[
             self.source.index("local function windows_powershell_path") : self.source.index(
-                "local function read_design_from_ui"
+                "local function frame(value)"
             )
         ]
         self.assertIn('ipairs({ "SystemRoot", "WINDIR" })', picker)
@@ -213,8 +211,8 @@ class LuaPortabilityTests(unittest.TestCase):
 
     def test_runner_uses_unique_files_and_strict_completion_json(self) -> None:
         runner = self.source[
-            self.source.index("local function run_runner_config") : self.source.index(
-                "local function set_busy"
+            self.source.index("local function queue_runner_task") : self.source.index(
+                "local function run_runner_config"
             )
         ]
         self.assertIn('stdout_template .. "." .. task_stem', runner)
@@ -229,7 +227,7 @@ class LuaPortabilityTests(unittest.TestCase):
         self.assertIn('["notice.color_manual"]', self.source)
         picker = self.source[
             self.source.index("function HANDLERS.pick_color_safely") : self.source.index(
-                "function HANDLERS.run_plugin"
+                "function HANDLERS.on_create"
             )
         ]
         self.assertIn("if not PLATFORM.windows then", picker)
@@ -239,7 +237,7 @@ class LuaPortabilityTests(unittest.TestCase):
     def test_windows_color_picker_failure_falls_back_to_manual_input(self) -> None:
         picker = self.source[
             self.source.index("function HANDLERS.pick_color_safely") : self.source.index(
-                "function HANDLERS.run_plugin"
+                "function HANDLERS.on_create"
             )
         ]
         self.assertIn("local ok, err = pcall", picker)

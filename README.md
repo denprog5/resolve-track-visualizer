@@ -5,15 +5,18 @@
 [![CI](https://github.com/denprog5/resolve-track-visualizer/actions/workflows/ci.yml/badge.svg)](https://github.com/denprog5/resolve-track-visualizer/actions/workflows/ci.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-Resolve Track Visualizer creates track cards for music timelines in DaVinci Resolve. A Lua menu script reads the active timeline, a bundled engine prepares metadata and artwork, and Resolve renders live time/progress elements in Fusion. Legacy alpha MOV rendering remains a fallback.
+Resolve Track Visualizer creates music player overlays for the audio clips of a DaVinci Resolve timeline. A Lua menu script reads the active timeline, a bundled engine prepares cover art, metadata, waveform and the static player layers, and each player is a lightweight Fusion composition whose time readout and progress are driven by expressions.
 
 ## Features
 
-- Classic, Minimal, and Portrait Glass skins with independent settings and palettes.
-- Live Fusion time/progress animation with per-clip alpha MOV fallback.
-- Bounded immutable helper timelines for safe repeated updates of long playlists.
-- MP3, WAV, FLAC, M4A, AAC, and OGG metadata and embedded artwork.
-- Russian and English UI with a future-language-ready catalog.
+- Five skins: Classic, Minimal, Portrait Glass, Compact and Wave, each with its own settings and default palette.
+- Fourteen built-in palettes, plus your own saved palettes that work with every skin.
+- Player presets: save the complete style (skin, layout, elements, colors, fonts) under a name, apply it later, rename, delete, and export/import it as a `.tviz-preset.json` file.
+- DJ-mix aware placement: tracks split across several audio tracks and overlapping in crossfades get one continuous row of players. The switch point is selectable (middle of the crossfade, start of the next track, or end of the current one), and a clip that plays entirely inside another track does not get its own player.
+- Trims on either side are respected: the time readout and progress start from the clip's source offset, and progress can show the position in the whole track or in the clip.
+- Non-blocking panel with live progress, Cancel, a style preview, and a log tab.
+- MP3, WAV, FLAC, M4A, AAC and OGG metadata and embedded artwork; waveform analysis with loudness-aware scaling.
+- Russian and English UI.
 - Private Windows x64 release-candidate builds and a separate manual Linux x64 packaging canary.
 
 ## Status
@@ -32,7 +35,7 @@ sha256sum -c SHA256SUMS
 
 On the first launch, **Auto (system)** chooses Russian for a Russian system UI language and English for every other language. Existing settings created by the former Russian-only version remain Russian after migration.
 
-The language can be changed under **Advanced -> Style actions -> Language**. Close and reopen Track Visualizer after changing it; theme and style values are preserved. The installer also accepts `--language auto`, `--language en`, or `--language ru`.
+The language can be changed on the **Log** tab under **Language**. Close and reopen Track Visualizer after changing it; theme and style values are preserved. The installer also accepts `--language auto`, `--language en`, or `--language ru`.
 
 ## Install And Run
 
@@ -66,12 +69,12 @@ Uninstall removes only managed runtime files and the Resolve menu script. User s
 
 Basic workflow:
 
-1. Put music clips on audio tracks such as `A1`, `A2`, and `A3`.
-2. Open Track Visualizer and choose the audio tracks and destination video track.
-3. Select a skin and palette.
-4. Choose **Create / update visualizers**.
+1. Put music clips on audio tracks such as `A1`, `A2` and `A3`; overlapping crossfades and trims are fine.
+2. Open Track Visualizer. On **Create**, set the audio tracks (for example `1-3`), the video track for the players, and how overlapping tracks switch.
+3. Pick a skin and palette on **Style**, or a saved preset on **Create** or **Presets**.
+4. Choose **Create players**. Running it again replaces the players on that video track; **Remove players** deletes them.
 
-The default live mode creates static RGBA cards and lightweight Fusion nodes for time and progress. If a live carrier cannot be created, the affected clip can fall back to a rendered alpha MOV.
+Players are placed only on an empty range of the chosen video track. The plugin keeps its carrier clip and layers in a `Track Visualizer` Media Pool bin and never creates helper timelines. **Remove old helper timelines** on the **Log** tab cleans up timelines left by earlier preview versions.
 
 ## Development
 
@@ -83,6 +86,8 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python -m unittest discover -s tests -v
 ```
+
+The skin catalog embedded in the Lua script is generated from `davinci_track_visualizer/skins.py`. After changing skins or palettes run `python scripts/sync_lua_catalog.py` (CI-style check: `--check`).
 
 Parse the Resolve Lua script without executing it:
 

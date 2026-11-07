@@ -29,13 +29,14 @@ class LuaLocalizationTests(unittest.TestCase):
         english = _catalog("en", "ru = {")
         defined = set(re.findall(r'^\s*\["([^"]+)"\]\s*=', english, re.MULTILINE))
         used = set(re.findall(r'\btr\("([^"]+)"', LUA_SOURCE))
-        used -= {"skin.", "palette."}
+        used -= {"skin.", "palette.", "switch_mode."}
         self.assertEqual(sorted(used - defined), [])
 
     def test_first_launch_and_manual_language_modes_are_stable(self) -> None:
         self.assertIn('local LANGUAGE_MODES = { "auto", "en", "ru" }', LUA_SOURCE)
         self.assertIn('language_mode = existing_settings and "ru" or "auto"', LUA_SOURCE)
-        self.assertIn('settings_version = 1', LUA_SOURCE)
+        self.assertIn('local SETTINGS_VERSION = 2', LUA_SOURCE)
+        self.assertIn('settings_version = SETTINGS_VERSION', LUA_SOURCE)
         self.assertIn('os.getenv("TVIZ_UI_LANG")', LUA_SOURCE)
         self.assertIn('GetUserPreferredUILanguages', LUA_SOURCE)
         self.assertIn('CFLocaleCopyPreferredLanguages', LUA_SOURCE)
