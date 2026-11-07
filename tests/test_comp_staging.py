@@ -24,26 +24,15 @@ class CompStagingWindowsTests(unittest.TestCase):
         self.assertEqual(comp_staging_dir(ascii_path, system="Windows", environ={}), ascii_path)
 
     def test_short_path_keeps_comps_in_the_user_folder(self) -> None:
-        with patch.object(platform_paths, "_windows_short_path", return_value=r"C:\Users\0434~1\comps"), \
-                patch.object(platform_paths, "_windows_private_dir") as private:
+        with patch.object(platform_paths, "_windows_short_path", return_value=r"C:\Users\0434~1\comps"):
             result = comp_staging_dir(self.preferred, system="Windows", environ={"ProgramData": r"C:\ProgramData"})
         self.assertEqual(result, Path(r"C:\Users\0434~1\comps"))
-        private.assert_not_called()
 
-    def test_shared_root_is_used_only_through_a_private_directory(self) -> None:
-        private_dir = self.root / "private"
-        with patch.object(platform_paths, "_windows_short_path", return_value=None), \
-                patch.object(platform_paths, "_windows_private_dir", return_value=private_dir) as private:
+    def test_shared_roots_are_never_used(self) -> None:
+        with patch.object(platform_paths, "_windows_short_path", return_value=None):
             result = comp_staging_dir(
-                self.preferred, system="Windows", environ={"ProgramData": "C:\\Данные", "PUBLIC": r"C:\Users\Public"}
+                self.preferred, system="Windows", environ={"ProgramData": r"C:\ProgramData", "PUBLIC": r"C:\Users\Public"}
             )
-        self.assertEqual(result, private_dir)
-        private.assert_called_once_with(Path(r"C:\Users\Public") / platform_paths.PRODUCT_DIRECTORY / "comps")
-
-    def test_without_a_safe_location_the_preferred_path_is_kept(self) -> None:
-        with patch.object(platform_paths, "_windows_short_path", return_value=None), \
-                patch.object(platform_paths, "_windows_private_dir", return_value=None):
-            result = comp_staging_dir(self.preferred, system="Windows", environ={"ProgramData": r"C:\ProgramData"})
         self.assertEqual(result, self.preferred)
 
 

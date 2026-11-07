@@ -28,7 +28,7 @@ All notable changes are documented here. This project follows [Keep a Changelog]
 
 ### Security
 
-- Fusion comps for users with non-ASCII profile paths are staged in the 8.3 short form of their own folder, or in a fresh directory that only they can access, never in a shared folder with a predictable name.
+- Fusion comps for users with non-ASCII profile paths are staged in the 8.3 short form of their own folder and never in a shared folder such as ProgramData.
 
 ### Removed
 

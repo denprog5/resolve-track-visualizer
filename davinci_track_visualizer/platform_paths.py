@@ -100,50 +100,6 @@ def _windows_short_path(path: Path) -> str | None:
     return buffer.value
 
 
-def _windows_current_user_sid() -> str | None:
-    import csv
-    import subprocess
-
-    try:
-        output = subprocess.run(
-            ["whoami", "/user", "/fo", "csv", "/nh"],
-            capture_output=True, text=True, check=True, timeout=15,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        ).stdout
-        row = next(csv.reader([output.strip()]))
-    except (OSError, subprocess.SubprocessError, StopIteration, ValueError):
-        return None
-    sid = row[-1].strip() if row else ""
-    return sid if sid.startswith("S-1-") else None
-
-
-def _windows_private_dir(parent: Path) -> Path | None:
-    """Fresh, unpredictable directory under ``parent`` readable only by this user and SYSTEM."""
-    import shutil
-    import subprocess
-    import tempfile
-
-    sid = _windows_current_user_sid()
-    if sid is None:
-        return None
-    try:
-        parent.mkdir(parents=True, exist_ok=True)
-        directory = Path(tempfile.mkdtemp(prefix="u-", dir=parent))
-    except OSError:
-        return None
-    try:
-        subprocess.run(
-            ["icacls", str(directory), "/inheritance:r",
-             "/grant:r", f"*{sid}:(OI)(CI)F", "/grant:r", "*S-1-5-18:(OI)(CI)F"],
-            capture_output=True, check=True, timeout=30,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except (OSError, subprocess.SubprocessError):
-        shutil.rmtree(directory, ignore_errors=True)
-        return None
-    return directory
-
-
 def _posix_private_dir(path: Path) -> Path | None:
     """``path`` as a directory owned by this user with no group/other access, or None."""
     import stat
@@ -176,9 +132,9 @@ def comp_staging_dir(
     Comps contain expressions that Resolve evaluates, so they are never staged in a location
     other local users can write to:
 
-    * Windows: the 8.3 short form of ``preferred`` (same folder, same permissions); if the volume
-      has no short names, a fresh randomly named folder under ProgramData restricted by ACL to
-      the current user and SYSTEM.
+    * Windows: only the 8.3 short form of ``preferred`` (same folder, same permissions). Shared
+      roots such as ProgramData are never used: their parent folders can be pre-created and
+      swapped by another user.
     * POSIX: ``$XDG_RUNTIME_DIR`` or ``/tmp``, only as a 0700 directory owned by this user.
 
     When nothing safe is available ``preferred`` is returned unchanged.
@@ -194,13 +150,6 @@ def comp_staging_dir(
         short = _windows_short_path(preferred)
         if short and short.isascii():
             return Path(short)
-        for name in ("ProgramData", "PUBLIC"):
-            base = env.get(name)
-            if not base or not base.isascii():
-                continue
-            private = _windows_private_dir(Path(base) / PRODUCT_DIRECTORY / "comps")
-            if private is not None:
-                return private
         return preferred
     import tempfile
 
