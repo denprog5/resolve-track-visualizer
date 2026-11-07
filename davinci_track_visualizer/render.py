@@ -526,14 +526,9 @@ class _Painter:
         size = self.sz(13)
         font = _font(size, str(self.design.get("artist_font_family") or "Segoe UI"))
         color = self.color("secondary_text_color", 200)
-        icon_r = max(3, int(size * 0.62))
-        cx = right - icon_r
-        cy = top + icon_r
-        draw.ellipse((cx - icon_r, cy - icon_r, cx + icon_r, cy + icon_r), outline=color, width=max(1, self.sz(1.4)))
-        tri = icon_r * 0.5
-        draw.polygon([(cx - tri * 0.55, cy - tri), (cx - tri * 0.55, cy + tri), (cx + tri, cy)], fill=color)
+        cy = top + max(3, int(size * 0.62))
         label = _safe_text(draw, str(self.design.get("brand_text") or ""), font)
-        draw.text((cx - icon_r - self.sz(6), cy), label, font=font, fill=color, anchor="rm")
+        draw.text((right, cy), label, font=font, fill=color, anchor="rm")
 
     def bars(self, x1: float, x2: float, base_y: float, max_h: float, *, mode: str, width_ratio: float, reflection: float = 0.0, min_pitch: float = 3.0) -> None:
         if x2 - x1 < 4:
