@@ -263,6 +263,16 @@ class LuaPortabilityTests(unittest.TestCase):
             self.assertEqual(len(entries), 2)
             self.assertTrue(all(".exe" not in entry for entry in entries))
 
+    def test_playback_rate_mismatch_is_reported_without_changing_the_project(self) -> None:
+        self.assertIn('read_frame_rate(project, timeline, "timelinePlaybackFrameRate")', self.source)
+        self.assertIn('ID = "RateWarning"', self.source)
+        self.assertIn("App.show_rate_warning(project, timeline)", self.source)
+        # The plugin only warns; project and timeline settings stay the user's.
+        self.assertNotRegex(self.source, r"(project|timeline):SetSetting\(")
+        for entry in re.findall(r'\["warning\.playback_rate"\]\s*=\s*"([^"]*)"', self.source):
+            self.assertIn("{playback}", entry)
+            self.assertIn("{timeline}", entry)
+
 
 if __name__ == "__main__":
     unittest.main()

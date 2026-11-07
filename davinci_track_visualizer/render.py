@@ -753,9 +753,11 @@ def _paint_wave(p: _Painter) -> None:
     radius = p.s * float(d["corner_radius"])
     p.panel((p.px(pad), p.py(pad), p.px(pad + card_w) - 1, p.py(pad + card_h) - 1), radius, shadow=110)
     if p.flags["cover"]:
-        size = 128
-        p.cover(p.px(pad + 20), p.py(pad + 20), p.s * size, p.s * 12)
-        text_x = p.px(pad + 20 + size + 24)
+        # Square cover filling the card height inside the same inset as the rest of the content.
+        inset = 20
+        size = card_h - inset * 2
+        p.cover(p.px(pad + inset), p.py(pad + inset), p.s * size, p.s * 12)
+        text_x = p.px(pad + inset + size + 24)
     else:
         text_x = p.px(pad + 28)
     text_right = p.px(pad + card_w - 24)

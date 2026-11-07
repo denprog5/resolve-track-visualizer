@@ -852,6 +852,7 @@ local I18N = {
         ["log.timeline_resolution"] = "Timeline: {width}x{height}, {fps} fps",
         ["error.resolution"] = "Resolve did not report the timeline resolution.",
         ["warning.fps_fallback"] = "Warning: the timeline frame rate could not be read; using 30 fps.",
+        ["warning.playback_rate"] = "Playback frame rate ({playback} fps) does not match the timeline ({timeline} fps): Resolve will play at the wrong speed with crackling sound. Set Playback frame rate to {timeline} in File → Project Settings → Master Settings.",
         ["error.video_track_index"] = "Invalid video track: {track}",
         ["error.video_track_add"] = "Resolve did not add the video track: {details}",
         ["error.video_track_count"] = "Resolve did not increase the video track count after AddTrack",
@@ -1101,6 +1102,7 @@ local I18N = {
         ["log.timeline_resolution"] = "Таймлайн: {width}x{height}, {fps} кадр/с",
         ["error.resolution"] = "Resolve не сообщил разрешение таймлайна.",
         ["warning.fps_fallback"] = "Внимание: частоту кадров таймлайна прочитать не удалось, использую 30.",
+        ["warning.playback_rate"] = "Частота воспроизведения ({playback} кадр/с) не совпадает с частотой таймлайна ({timeline} кадр/с): Resolve будет играть с неправильной скоростью, а звук — хрипеть. Поставьте Playback frame rate = {timeline} в File → Project Settings → Master Settings.",
         ["error.video_track_index"] = "Неверный номер видеодорожки: {track}",
         ["error.video_track_add"] = "Resolve не добавил видеодорожку: {details}",
         ["error.video_track_count"] = "Resolve не увеличил число видеодорожек после AddTrack",
@@ -2729,19 +2731,41 @@ local function seconds(value)
     return parsed
 end
 
-local function timeline_fps(project, timeline)
-    local owners = { timeline, project }
-    for _, owner in ipairs(owners) do
-        local ok, raw = pcall(function() return owner:GetSetting("timelineFrameRate") end)
+-- Reads a frame-rate setting ("30", "29.97 DF", "23,976") from the timeline, then the project.
+local function read_frame_rate(project, timeline, key)
+    for _, owner in ipairs({ timeline, project }) do
+        local ok, raw = pcall(function() return owner:GetSetting(key) end)
         if ok and raw and tostring(raw) ~= "" then
             local fps_text = tostring(raw)
             fps_text = fps_text:gsub("DF", ""):gsub("df", ""):gsub(",", ".")
             fps_text = fps_text:match("%d+%.?%d*") or ""
             local value = tonumber(fps_text)
-            if value then return value end
+            if value and value > 0 then return value end
         end
     end
-    return 30
+    return nil
+end
+
+-- Returns the timeline frame rate and whether it fell back to 30.
+local function timeline_fps(project, timeline)
+    local value = read_frame_rate(project, timeline, "timelineFrameRate")
+    if value then return value, false end
+    return 30, true
+end
+
+local function format_rate(value)
+    if math.abs(value - math.floor(value + 0.5)) < 0.001 then return tostring(math.floor(value + 0.5)) end
+    return (string.format("%.3f", value):gsub("0+$", ""))
+end
+
+-- Resolve plays the timeline at the project's playback frame rate. When it differs from the
+-- timeline frame rate, playback runs at the wrong speed with crackling audio; the players
+-- themselves are still correct. Returns the warning text, or "" when the rates match.
+local function playback_rate_warning(project, timeline)
+    local timeline_rate = read_frame_rate(project, timeline, "timelineFrameRate")
+    local playback_rate = read_frame_rate(project, timeline, "timelinePlaybackFrameRate")
+    if not timeline_rate or not playback_rate or math.abs(timeline_rate - playback_rate) < 0.01 then return "" end
+    return tr("warning.playback_rate", { playback = format_rate(playback_rate), timeline = format_rate(timeline_rate) })
 end
 
 local function timeline_resolution(project, timeline)
@@ -3386,7 +3410,8 @@ end
 local function collect_jobs(project, timeline, apply_scope)
     local audio_tracks = parse_track_list(text_field("AudioTracks", "1"))
     local video_track = int_field("VideoTrack", 2, 1, 64)
-    local fps = timeline_fps(project, timeline)
+    local fps, fps_fallback = timeline_fps(project, timeline)
+    if fps_fallback then append_log(tr("warning.fps_fallback")) end
     local jobs = {}
     local scan_summary = {}
     local missing_path_count = 0
@@ -3695,6 +3720,18 @@ function App.set_busy(is_busy)
     pcall(function() win:RecalcLayout() end)
 end
 
+-- Shows or hides the playback/timeline frame-rate mismatch warning; returns its text.
+function App.show_rate_warning(project, timeline)
+    local text = playback_rate_warning(project, timeline)
+    local label = win and win:Find("RateWarning") or nil
+    if label then
+        pcall(function() label.Text = text end)
+        pcall(function() label.Hidden = text == "" end)
+        pcall(function() win:RecalcLayout() end)
+    end
+    return text
+end
+
 function Pipeline.start()
     if Pipeline.state then error(tr("error.busy")) end
     Pipeline.state = { phase = "scan", started = os.time(), placed = 0, failed = 0, comps = {} }
@@ -3768,6 +3805,8 @@ function Pipeline.scan(state)
     end
     append_log(tr("log.audio_found", { tracks = table.concat(scan.audio_tracks, ","), count = #scan.jobs }))
     append_log(tr("log.timeline_resolution", { width = scan.width, height = scan.height, fps = scan.fps }))
+    local rate_warning = App.show_rate_warning(project, timeline)
+    if rate_warning ~= "" then append_log(rate_warning) end
     Preview.frame = { scan.width, scan.height }
     local skin = Settings.data.active_skin
     local tracks = {}
@@ -4775,6 +4814,7 @@ function App.build_create_page(fonts)
             ui:Button({ ID = "RemovePlayers", Text = tr("action.remove_players"), MinimumSize = { 190, 28 }, Weight = 0, StyleSheet = App.widget_styles.quiet }),
         }),
         ui:Label({ ID = "LastError", Text = "", Hidden = true, WordWrap = true, Font = fonts.hint, Weight = 0, StyleSheet = App.widget_styles.error }),
+        ui:Label({ ID = "RateWarning", Text = "", Hidden = true, WordWrap = true, MinimumSize = { 0, 72 }, Font = fonts.hint, Weight = 0, StyleSheet = App.widget_styles.warning }),
         ui:VGap(0, 1),
     })
     return ui:HGroup({ ID = "PageCreate", Weight = 1, Spacing = 20 }, {
@@ -4964,6 +5004,7 @@ App.widget_styles = {
     muted = "QLabel { color: #8b9099; }",
     divider = "QLabel { background: #2c2f36; border: none; }",
     error = "QLabel { padding: 8px 10px; background: #3a2222; color: #f3aaa4; border: 1px solid #6e3c39; border-radius: 6px; }",
+    warning = "QLabel { padding: 8px 10px; background: #3a3020; color: #f0d29a; border: 1px solid #6b5630; border-radius: 6px; }",
     preview = function(width, height)
         return string.format("QPushButton { min-width: %dpx; max-width: %dpx; min-height: %dpx; max-height: %dpx; padding: 0;"
             .. " background: #111216; border: 1px solid #2c2f36; border-radius: 8px; }"
@@ -5147,6 +5188,10 @@ function App.populate()
     Editor.refresh_palette_combos()
     Presets.refresh()
     Editor.update_preset_summary()
+    pcall(function()
+        local _, project, timeline = current_project_and_timeline()
+        App.show_rate_warning(project, timeline)
+    end)
     App.show_page(0)
     App.show_style_page(0)
     Log.refresh_widget()
