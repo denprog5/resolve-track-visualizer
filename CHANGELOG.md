@@ -25,6 +25,9 @@ All notable changes are documented here. This project follows [Keep a Changelog]
 
 - Players are placed from one plugin-owned transparent carrier clip with one imported Fusion composition per clip; time and progress are expressions instead of per-second keyframes.
 - Waveforms use streamed decoding with percentile normalization, perceptual scaling and smoothing.
+- Classic and Portrait Glass show one progress indicator, chosen in Look → Progress style: the waveform with a playhead or a line with a dot. Designs saved earlier keep the indicator they showed.
+- Classic: the square cover fills the card height inside even margins, the progress row sits on the cover's bottom edge, and the default title and artist sizes are smaller.
+- Artist and title lines in every skin are stacked by their real glyph height and shrink together when a large or tall font would not fit, so they no longer overlap each other or the progress row.
 - Multiple artists separated by `/` are shown as a comma-separated list.
 - A track the engine cannot read is reported in the log instead of failing the whole run.
 

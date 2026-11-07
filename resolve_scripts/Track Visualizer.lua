@@ -236,7 +236,7 @@ local SKIN_CATALOG = {
             accent_color = "#EBEEF0",
             anchor = "bottom_left",
             artist_font_family = "Segoe UI",
-            artist_size = 18,
+            artist_size = 16,
             bar_count = 72,
             border_alpha = 82,
             border_color = "#FFFFFF",
@@ -246,11 +246,12 @@ local SKIN_CATALOG = {
             glass_strength = 46,
             margin_x = 48,
             margin_y = 48,
-            meta_size = 15,
+            meta_size = 14,
             panel_alpha = 154,
             panel_color = "#121619",
             primary_text_color = "#F5F7F8",
             progress_basis = "track",
+            progress_style = "wave",
             scale = 100,
             secondary_text_color = "#EEF3F5",
             show_artist = true,
@@ -265,7 +266,7 @@ local SKIN_CATALOG = {
             time_font_family = "Segoe UI",
             time_mode = "elapsed_total",
             title_font_family = "Segoe UI",
-            title_size = 32,
+            title_size = 26,
             track_color = "#EBEEF0",
             uppercase_artist = false,
         },
@@ -288,6 +289,7 @@ local SKIN_CATALOG = {
             panel_color = "#0E1714",
             primary_text_color = "#F2FFF9",
             progress_basis = "track",
+            progress_style = "wave",
             scale = 100,
             secondary_text_color = "#A7E8D3",
             show_artist = true,
@@ -325,6 +327,7 @@ local SKIN_CATALOG = {
             panel_color = "#241704",
             primary_text_color = "#FFD84A",
             progress_basis = "track",
+            progress_style = "wave",
             scale = 100,
             secondary_text_color = "#F2A900",
             show_artist = true,
@@ -362,6 +365,7 @@ local SKIN_CATALOG = {
             panel_color = "#171125",
             primary_text_color = "#FFF8ED",
             progress_basis = "track",
+            progress_style = "wave",
             scale = 100,
             secondary_text_color = "#D8CCF2",
             show_artist = true,
@@ -399,6 +403,7 @@ local SKIN_CATALOG = {
             panel_color = "#0B0F1A",
             primary_text_color = "#F3F6FF",
             progress_basis = "track",
+            progress_style = "wave",
             scale = 100,
             secondary_text_color = "#AEBBDD",
             show_artist = true,
@@ -421,13 +426,14 @@ local SKIN_CATALOG = {
     enums = {
         anchor = { "bottom_left", "bottom_center", "bottom_right", "top_left", "top_center", "top_right", "center" },
         progress_basis = { "track", "clip" },
+        progress_style = { "wave", "line" },
         time_mode = { "elapsed_total", "split", "elapsed", "remaining", "none" },
     },
     features = {
-        classic = { "cover", "artist", "title", "brand", "time", "progress", "knob", "bars", "glass" },
+        classic = { "cover", "artist", "title", "brand", "time", "progress", "knob", "bars", "glass", "progress_style" },
         compact = { "cover", "artist", "title", "time", "progress", "knob" },
         minimal = { "artist", "title", "time", "progress" },
-        portrait_glass = { "cover", "artist", "title", "time", "progress", "knob", "bars", "glass" },
+        portrait_glass = { "cover", "artist", "title", "time", "progress", "knob", "bars", "glass", "progress_style" },
         wave = { "cover", "artist", "title", "brand", "time", "bars", "knob", "glass" },
     },
     int_ranges = {
@@ -602,6 +608,7 @@ local SKIN_CATALOG = {
         },
     },
     progress_bases = { "track", "clip" },
+    progress_styles = { "wave", "line" },
     schema = 2,
     skins = { "classic", "minimal", "portrait_glass", "compact", "wave" },
     text_limits = {
@@ -733,7 +740,10 @@ local I18N = {
         ["field.title_toggle"] = "Title",
         ["field.brand"] = "Brand",
         ["field.time"] = "Time",
-        ["field.progress"] = "Progress line",
+        ["field.progress"] = "Progress",
+        ["field.progress_style"] = "Progress style",
+        ["progress_style.wave"] = "Waveform",
+        ["progress_style.line"] = "Line",
         ["field.knob"] = "Playhead marker",
         ["field.bars"] = "Waveform",
         ["field.glass"] = "Glass",
@@ -983,7 +993,10 @@ local I18N = {
         ["field.title_toggle"] = "Название",
         ["field.brand"] = "Бренд",
         ["field.time"] = "Время",
-        ["field.progress"] = "Линия прогресса",
+        ["field.progress"] = "Прогресс",
+        ["field.progress_style"] = "Вид прогресса",
+        ["progress_style.wave"] = "Волна",
+        ["progress_style.line"] = "Полоска",
         ["field.knob"] = "Маркер позиции",
         ["field.bars"] = "Волна",
         ["field.glass"] = "Стекло",
@@ -2037,6 +2050,18 @@ function Style.sanitize(skin, source)
                 if text == "" and key:match("font_family$") then text = default end
                 design[key] = string.sub(text, 1, limit)
             end
+        end
+    end
+    -- Designs saved before the progress style toggled the waveform and the line separately
+    -- (mirrors _migrate_progress_style in skins.py).
+    if Style.supports(skin, "progress_style") and (source.progress_style == nil or source.progress_style == JSON_NULL) then
+        local bars = source.show_bars ~= false and source.show_bars ~= 0
+        local line = source.show_progress ~= false and source.show_progress ~= 0
+        if not bars and not line then
+            design.show_progress = false
+        else
+            design.progress_style = (line and not bars) and "line" or "wave"
+            design.show_progress = true
         end
     end
     return design
@@ -4095,7 +4120,8 @@ Editor.toggles = {
     { id = "ShowTime", key = "show_time", feature = "time", label = "field.time" },
     { id = "ShowProgress", key = "show_progress", feature = "progress", label = "field.progress" },
     { id = "ShowKnob", key = "show_knob", feature = "knob", label = "field.knob" },
-    { id = "ShowBars", key = "show_bars", feature = "bars", label = "field.bars" },
+    -- Skins with a progress style show one indicator, so their separate waveform toggle is off.
+    { id = "ShowBars", key = "show_bars", feature = "bars", label = "field.bars", exclude = "progress_style" },
     { id = "GlassEnabled", key = "glass_enabled", feature = "glass", label = "field.glass" },
     { id = "UppercaseArtist", key = "uppercase_artist", feature = "artist", label = "field.uppercase_artist" },
 }
@@ -4124,6 +4150,7 @@ Editor.enums = {
     { id = "Anchor", key = "anchor", prefix = "anchor." },
     { id = "TimeMode", key = "time_mode", prefix = "time_mode.", feature = "time" },
     { id = "ProgressBasis", key = "progress_basis", prefix = "progress_basis." },
+    { id = "ProgressStyle", key = "progress_style", prefix = "progress_style.", feature = "progress_style" },
 }
 
 function Editor.combo_index(element_id)
@@ -4226,7 +4253,9 @@ function Editor.update_capabilities()
         local element = win:Find(element_id)
         if element then pcall(function() element.Enabled = enabled and true or false end) end
     end
-    for _, toggle in ipairs(Editor.toggles) do enable(toggle.id, Style.supports(skin, toggle.feature)) end
+    for _, toggle in ipairs(Editor.toggles) do
+        enable(toggle.id, Style.supports(skin, toggle.feature) and not (toggle.exclude and Style.supports(skin, toggle.exclude)))
+    end
     for _, number in ipairs(Editor.numbers) do enable(number.id, number.feature == nil or Style.supports(skin, number.feature)) end
     for _, font in ipairs(Editor.fonts) do enable(font.id, font.feature == nil or Style.supports(skin, font.feature)) end
     for _, enum in ipairs(Editor.enums) do enable(enum.id, enum.feature == nil or Style.supports(skin, enum.feature)) end
@@ -4849,6 +4878,7 @@ function App.build_style_page(fonts)
     for _, row in ipairs(toggle_rows) do table.insert(layout_children, row) end
     for _, row in ipairs({
         ui:VGap(4, 0),
+        App.row(tr("field.progress_style"), { ui:ComboBox({ ID = "ProgressStyle", MinimumSize = { 240, 28 }, Weight = 0 }) }),
         App.row(tr("field.time_mode"), { ui:ComboBox({ ID = "TimeMode", MinimumSize = { 240, 28 }, Weight = 0 }) }),
         App.row(tr("field.progress_basis"), { ui:ComboBox({ ID = "ProgressBasis", MinimumSize = { 240, 28 }, Weight = 0 }) }),
         App.row(tr("field.bar_count"), { App.spin("BarCount", 8, 200) }),

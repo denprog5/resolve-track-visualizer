@@ -16,6 +16,8 @@ SUPPORTED_SKINS = ("classic", "minimal", "portrait_glass", "compact", "wave")
 ANCHORS = ("bottom_left", "bottom_center", "bottom_right", "top_left", "top_center", "top_right", "center")
 TIME_MODES = ("elapsed_total", "split", "elapsed", "remaining", "none")
 PROGRESS_BASES = ("track", "clip")
+# Skins with the "progress_style" feature draw one progress indicator: the waveform or a line.
+PROGRESS_STYLES = ("wave", "line")
 
 # Player size in pixels at 100 % scale on a 1080-line frame.
 SKIN_BASE_SIZES: dict[str, tuple[int, int]] = {
@@ -28,9 +30,9 @@ SKIN_BASE_SIZES: dict[str, tuple[int, int]] = {
 
 # Elements a skin can draw. Toggles for anything else are ignored.
 SKIN_FEATURES: dict[str, tuple[str, ...]] = {
-    "classic": ("cover", "artist", "title", "brand", "time", "progress", "knob", "bars", "glass"),
+    "classic": ("cover", "artist", "title", "brand", "time", "progress", "knob", "bars", "glass", "progress_style"),
     "minimal": ("artist", "title", "time", "progress"),
-    "portrait_glass": ("cover", "artist", "title", "time", "progress", "knob", "bars", "glass"),
+    "portrait_glass": ("cover", "artist", "title", "time", "progress", "knob", "bars", "glass", "progress_style"),
     "compact": ("cover", "artist", "title", "time", "progress", "knob"),
     "wave": ("cover", "artist", "title", "brand", "time", "bars", "knob", "glass"),
 }
@@ -84,6 +86,7 @@ ENUMS: dict[str, tuple[str, ...]] = {
     "anchor": ANCHORS,
     "time_mode": TIME_MODES,
     "progress_basis": PROGRESS_BASES,
+    "progress_style": PROGRESS_STYLES,
 }
 TEXT_LIMITS: dict[str, int] = {
     "brand_text": 40,
@@ -111,6 +114,7 @@ _COMMON_DEFAULTS: dict[str, Any] = {
     "time_bold": False,
     "time_mode": "elapsed_total",
     "progress_basis": "track",
+    "progress_style": "wave",
     "bar_count": 72,
     "panel_color": "#121619",
     "panel_alpha": 154,
@@ -131,7 +135,11 @@ _COMMON_DEFAULTS: dict[str, Any] = {
 }
 
 _SKIN_OVERRIDES: dict[str, dict[str, Any]] = {
-    "classic": {},
+    "classic": {
+        "title_size": 26,
+        "artist_size": 16,
+        "meta_size": 14,
+    },
     "minimal": {
         "panel_color": "#241704",
         "panel_alpha": 224,
@@ -284,11 +292,26 @@ def _to_int(value: Any, fallback: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, int(round(number))))
 
 
+def _migrate_progress_style(source: dict[str, Any], skin: str) -> None:
+    """Designs saved before ``progress_style`` toggled the waveform and the line separately."""
+    if "progress_style" not in SKIN_FEATURES[skin] or "progress_style" in source:
+        return
+    bars = _to_bool(source.get("show_bars"), True)
+    line = _to_bool(source.get("show_progress"), True)
+    if not bars and not line:
+        source["show_progress"] = False
+        return
+    source["progress_style"] = "line" if line and not bars else "wave"
+    source["show_progress"] = True
+
+
 def normalize_design(design: Mapping[str, Any] | None, skin: str) -> dict[str, Any]:
     """Merge user overrides over the skin defaults and coerce every known key to its type."""
     check_skin(skin)
     defaults = default_design(skin)
     source = dict(design or {})
+    if design:
+        _migrate_progress_style(source, skin)
     result: dict[str, Any] = {}
     for key, fallback in defaults.items():
         value = source.get(key, fallback)
@@ -314,6 +337,21 @@ def normalize_design(design: Mapping[str, Any] | None, skin: str) -> dict[str, A
 def effective_flags(design: Mapping[str, Any], skin: str) -> dict[str, bool]:
     """Which elements are drawn: the user's toggle AND the skin's capability."""
     features = set(SKIN_FEATURES[check_skin(skin)])
+    if "progress_style" in features:
+        # One indicator: "Show progress" turns it on, the style picks the waveform or the line.
+        shown = bool(design.get("show_progress"))
+        wave = design.get("progress_style") != "line"
+        return {
+            "cover": bool(design.get("show_cover")),
+            "artist": bool(design.get("show_artist")),
+            "title": bool(design.get("show_title")),
+            "brand": "brand" in features and bool(design.get("show_brand")) and bool(str(design.get("brand_text") or "").strip()),
+            "time": bool(design.get("show_time")) and design.get("time_mode") != "none",
+            "progress": shown and not wave,
+            "knob": bool(design.get("show_knob")),
+            "bars": shown and wave,
+            "glass": bool(design.get("glass_enabled")),
+        }
     return {
         "cover": "cover" in features and bool(design.get("show_cover")),
         "artist": "artist" in features and bool(design.get("show_artist")),
@@ -335,6 +373,7 @@ def catalog() -> dict[str, Any]:
         "anchors": list(ANCHORS),
         "time_modes": list(TIME_MODES),
         "progress_bases": list(PROGRESS_BASES),
+        "progress_styles": list(PROGRESS_STYLES),
         "base_sizes": {skin: list(size) for skin, size in SKIN_BASE_SIZES.items()},
         "features": {skin: list(features) for skin, features in SKIN_FEATURES.items()},
         "defaults": {skin: default_design(skin) for skin in SUPPORTED_SKINS},

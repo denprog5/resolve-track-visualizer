@@ -110,6 +110,32 @@ class NormalizeDesignTests(unittest.TestCase):
                 if enabled:
                     self.assertIn(feature, SKIN_FEATURES[skin], f"{skin}: {feature}")
 
+    def test_progress_style_draws_exactly_one_indicator(self) -> None:
+        for skin in ("classic", "portrait_glass"):
+            self.assertIn("progress_style", SKIN_FEATURES[skin])
+            wave = effective_flags(normalize_design({"progress_style": "wave"}, skin), skin)
+            line = effective_flags(normalize_design({"progress_style": "line"}, skin), skin)
+            hidden = effective_flags(normalize_design({"progress_style": "line", "show_progress": False}, skin), skin)
+            self.assertEqual((wave["bars"], wave["progress"]), (True, False))
+            self.assertEqual((line["bars"], line["progress"]), (False, True))
+            self.assertEqual((hidden["bars"], hidden["progress"]), (False, False))
+        self.assertEqual(default_design("classic")["progress_style"], "wave")
+        self.assertEqual(normalize_design({"progress_style": "dots"}, "classic")["progress_style"], "wave")
+
+    def test_designs_saved_before_progress_style_keep_their_indicator(self) -> None:
+        cases = {
+            (True, True): ("wave", True),
+            (False, True): ("line", True),
+            (True, False): ("wave", True),
+        }
+        for (bars, line), (style, shown) in cases.items():
+            design = normalize_design({"show_bars": bars, "show_progress": line, "title_size": 30}, "classic")
+            self.assertEqual((design["progress_style"], design["show_progress"]), (style, shown), (bars, line))
+        neither = normalize_design({"show_bars": False, "show_progress": False}, "classic")
+        self.assertFalse(neither["show_progress"])
+        # Skins without the feature are untouched.
+        self.assertFalse(normalize_design({"show_progress": False}, "wave")["show_progress"])
+
 
 class GeometryTests(unittest.TestCase):
     def test_bounds_scale_with_resolution_and_stay_in_frame(self) -> None:
@@ -143,6 +169,22 @@ class GeometryTests(unittest.TestCase):
             if y < 270:
                 corner = (corner[0], 539)
             self.assertEqual(layers.card.getpixel(corner)[3], 0, skin)
+
+    def test_stacked_text_shrinks_large_fonts_to_fit_above_the_progress_row(self) -> None:
+        from davinci_track_visualizer.render import _Painter
+
+        design = normalize_design({"title_size": 48, "artist_size": 40}, "classic")
+        painter = _Painter(1920, 1080, design, "classic", INFO, sample_levels(16))
+        white = (255, 255, 255, 255)
+        lines = [
+            ("Исполнитель", "artist_size", "artist_font_family", white, 500.0),
+            ("Название трека", "title_size", "title_font_family", white, 500.0),
+        ]
+        free_bottom = painter.stack_text(100, 300, lines, gap=6)
+        limit = 100 + (free_bottom - 300) * 0.7
+        bottom = painter.stack_text(100, 100, lines, gap=6, bottom=limit)
+        self.assertLessEqual(bottom, limit + 1)
+        self.assertLess(bottom - 100, free_bottom - 300)
 
     def test_readouts_follow_time_modes(self) -> None:
         self.assertEqual(readout_text("elapsed_total", 65, 225), "01:05 / 03:45")

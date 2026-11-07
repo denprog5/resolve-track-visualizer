@@ -474,6 +474,47 @@ class _Painter:
         fitted = _fit_text(draw, text, font, max(1.0, max_width))
         draw.text((x, y), fitted, font=font, fill=fill, anchor=anchor)
 
+    def _glyph_box(self, font: FontType) -> tuple[float, float]:
+        """Visual top and bottom of a text line relative to its baseline (accents and descenders)."""
+        _, top, _, bottom = ImageDraw.Draw(self.card).textbbox((0, 0), "HgЙ", font=font, anchor="ls")
+        return float(top), float(bottom)
+
+    def stack_text(
+        self,
+        x: float,
+        top: float,
+        lines: Sequence[tuple[str, str, str, tuple[int, int, int, int], float]],
+        gap: float,
+        bottom: float | None = None,
+        center: bool = False,
+    ) -> float:
+        """Draw lines top-down from ``top`` so their glyphs never overlap.
+
+        Each line is ``(text, size_key, family_key, fill, max_width)``. When the chosen sizes do
+        not fit above ``bottom`` the whole block shrinks proportionally (down to 55 %), so a large
+        or tall font never runs into the next line or the progress row. With ``center`` the block
+        is centred between ``top`` and ``bottom``. Returns the block bottom.
+        """
+        lines = [line for line in lines if line[0]]
+        if not lines:
+            return top
+        def measure(factor: float) -> tuple[list[FontType], list[tuple[float, float]], float]:
+            fonts = [self.font(size_key, family_key, factor=factor) for _, size_key, family_key, _, _ in lines]
+            boxes = [self._glyph_box(font) for font in fonts]
+            return fonts, boxes, sum(b - t for t, b in boxes) + gap * (len(lines) - 1)
+
+        factor = 1.0
+        fonts, boxes, height = measure(factor)
+        while bottom is not None and top + height > bottom and factor > 0.55:
+            factor = max(0.55, factor * min(0.97, (bottom - top) / height))
+            fonts, boxes, height = measure(factor)
+        y = top + max(0.0, (bottom - top - height) / 2) if center and bottom is not None else top
+        for (text, _, _, fill, max_width), font, (box_top, box_bottom) in zip(lines, fonts, boxes):
+            baseline = y - box_top
+            self.text(x, baseline, text, font, fill, max_width, anchor="ls")
+            y = baseline + box_bottom + gap
+        return y - gap
+
     def artist_text(self) -> str:
         artist = self.info.artist or ""
         return artist.upper() if self.design.get("uppercase_artist") else artist
@@ -625,27 +666,40 @@ def _paint_classic(p: _Painter) -> None:
     card_w, card_h = 640 - pad * 2, 160 - pad * 2
     radius = p.s * float(d["corner_radius"])
     p.panel((p.px(pad), p.py(pad), p.px(pad + card_w) - 1, p.py(pad + card_h) - 1), radius)
+    # Everything sits inside one inset; the square cover fills its height.
+    inset = 16
+    content_top, content_bottom = pad + inset, pad + card_h - inset
     if p.flags["cover"]:
-        cover = card_h - 32
-        p.cover(p.px(pad + 14), p.py(pad + 16), p.s * cover, p.s * 8)
-        text_x = p.px(pad + 14 + cover + 22)
+        cover = content_bottom - content_top
+        p.cover(p.px(pad + inset), p.py(content_top), p.s * cover, p.s * 10)
+        text_x = p.px(pad + inset + cover + 20)
     else:
-        text_x = p.px(pad + 26)
-    text_right = p.px(pad + card_w - 22)
-    p.brand(text_right, p.py(pad + 14))
+        text_x = p.px(pad + 24)
+    text_right = p.px(pad + card_w - 20)
+    p.brand(text_right, p.py(content_top))
     brand_reserve = p.sz(120) if p.flags["brand"] else 0
-    if p.flags["artist"]:
-        p.text(text_x, p.py(pad + 22), p.artist_text(), p.font("artist_size", "artist_font_family"), p.color("secondary_text_color", 226), text_right - text_x - brand_reserve)
-    if p.flags["title"]:
-        p.text(text_x, p.py(pad + 44), p.info.title, p.font("title_size", "title_font_family"), p.color("primary_text_color"), text_right - text_x)
-    row_y = p.py(pad + 112)
+    indicator = p.flags["bars"] or p.flags["progress"]
+    # Bottom row: waveform (with a playhead) or a line (with a dot), time on the right or at the ends.
+    row_h = 28 if p.flags["bars"] else 12
+    row_y = p.py(content_bottom - row_h / 2) if (indicator or p.flags["time"]) else p.py(content_bottom)
+    p.stack_text(
+        text_x,
+        p.py(content_top + 2),
+        [
+            (p.artist_text() if p.flags["artist"] else "", "artist_size", "artist_font_family", p.color("secondary_text_color", 226), text_right - text_x - brand_reserve),
+            (p.info.title if p.flags["title"] else "", "title_size", "title_font_family", p.color("primary_text_color"), text_right - text_x),
+        ],
+        gap=p.s * 6,
+        bottom=(row_y - p.s * (row_h / 2 + 10)) if (indicator or p.flags["time"]) else p.py(content_bottom),
+    )
     free_left, free_right = p.time_row(text_x, text_right, row_y, p.color("secondary_text_color", 225))
     if p.flags["bars"]:
-        p.bars(free_left, free_right, p.py(pad + 120), p.s * 30, mode="up", width_ratio=0.36, reflection=0.32, min_pitch=5)
-    if p.flags["progress"]:
-        line_y = p.py(pad + card_h - 9)
-        p.line(text_x, text_right, line_y, max(1.0, p.s * 2))
-        p.dot_knob(text_x, line_y, p.s * 4)
+        half = p.s * row_h / 2
+        p.bars(free_left, free_right, row_y, half * 2, mode="mirror", width_ratio=0.5, min_pitch=4)
+        p.bar_knob(free_left, row_y - half - p.sz(3), row_y + half + p.sz(3), max(2.0, p.s * 2.5))
+    elif p.flags["progress"]:
+        p.line(free_left, free_right, row_y, max(2.0, p.s * 4))
+        p.dot_knob(free_left, row_y, p.s * 5.5)
 
 
 def _minimal_timer_box(p: _Painter) -> tuple[float, float, float, float]:
@@ -676,10 +730,17 @@ def _paint_minimal(p: _Painter) -> None:
         ImageDraw.Draw(p.card).rectangle((card_left, card_top, card_left + max(2, p.sz(7)), card_bottom), fill=p.color("secondary_text_color"))
         text_x = card_left + p.sz(24)
         max_w = card_right - text_x - p.sz(20)
-        if p.flags["artist"]:
-            p.text(text_x, card_top + p.sz(42), p.artist_text(), p.font("artist_size", "artist_font_family"), p.color("secondary_text_color"), max_w)
-        if p.flags["title"]:
-            p.text(text_x, card_top + p.sz(72), p.info.title.upper(), p.font("title_size", "title_font_family"), p.color("primary_text_color"), max_w)
+        p.stack_text(
+            text_x,
+            card_top + p.sz(24),
+            [
+                (p.artist_text() if p.flags["artist"] else "", "artist_size", "artist_font_family", p.color("secondary_text_color"), max_w),
+                (p.info.title.upper() if p.flags["title"] else "", "title_size", "title_font_family", p.color("primary_text_color"), max_w),
+            ],
+            gap=p.s * 10,
+            bottom=card_bottom - p.sz(24),
+            center=True,
+        )
     if timer:
         x1, y1, x2, y2 = timer
         ImageDraw.Draw(p.card).rectangle((x1, y1, x2 - 1, y2 - 1), fill=p.color("primary_text_color"))
@@ -704,17 +765,27 @@ def _paint_portrait_glass(p: _Painter) -> None:
         info_top = pad + inner + cover
     else:
         info_top = pad + 180
-    if p.flags["artist"]:
-        p.text(text_x, p.py(info_top + 20), p.artist_text(), p.font("artist_size", "artist_font_family"), p.color("secondary_text_color", 226), text_right - text_x)
-    if p.flags["title"]:
-        p.text(text_x, p.py(info_top + 46), p.info.title, p.font("title_size", "title_font_family"), p.color("primary_text_color"), text_right - text_x)
-    line_y = p.py(pad + card_h - 30)
+    # Bottom: the time row, with the waveform or the line just above it.
+    time_y = p.py(pad + card_h - inner - 8)
+    indicator_y = time_y - p.sz(30)
+    indicator_top = indicator_y - p.sz(40) if p.flags["bars"] else indicator_y - p.sz(8)
+    p.stack_text(
+        text_x,
+        p.py(info_top + 18),
+        [
+            (p.artist_text() if p.flags["artist"] else "", "artist_size", "artist_font_family", p.color("secondary_text_color", 226), text_right - text_x),
+            (p.info.title if p.flags["title"] else "", "title_size", "title_font_family", p.color("primary_text_color"), text_right - text_x),
+        ],
+        gap=p.s * 8,
+        bottom=indicator_top - p.sz(14),
+    )
     if p.flags["bars"]:
-        p.bars(text_x, text_right, p.py(pad + card_h - 74), p.s * 40, mode="up", width_ratio=0.5, reflection=0.0, min_pitch=5)
-    if p.flags["progress"]:
-        p.line(text_x, text_right, line_y, max(2.0, p.s * 3))
-        p.dot_knob(text_x, line_y, p.s * 5)
-    p.time_row(text_x, text_right, line_y - p.sz(22) if p.flags["progress"] else line_y, p.color("secondary_text_color", 225))
+        p.bars(text_x, text_right, indicator_y, p.s * 40, mode="up", width_ratio=0.5, reflection=0.0, min_pitch=5)
+        p.bar_knob(text_x, indicator_y - p.sz(44), indicator_y + p.sz(4), max(2.0, p.s * 2.5))
+    elif p.flags["progress"]:
+        p.line(text_x, text_right, indicator_y, max(2.0, p.s * 4))
+        p.dot_knob(text_x, indicator_y, p.s * 5.5)
+    p.time_row(text_x, text_right, time_y, p.color("secondary_text_color", 225))
 
 
 def _paint_compact(p: _Painter) -> None:
@@ -733,11 +804,17 @@ def _paint_compact(p: _Painter) -> None:
     title_right = right
     if p.flags["time"] and d.get("time_mode") != "split":
         title_right = p.time_row(text_x, right, p.py(30), color)[1]
-    if p.flags["title"]:
-        p.text(text_x, p.py(14), p.info.title, p.font("title_size", "title_font_family"), p.color("primary_text_color"), title_right - text_x)
-    if p.flags["artist"]:
-        p.text(text_x, p.py(44), p.artist_text(), p.font("artist_size", "artist_font_family"), color, title_right - text_x)
     line_y = p.py(78)
+    p.stack_text(
+        text_x,
+        p.py(14),
+        [
+            (p.info.title if p.flags["title"] else "", "title_size", "title_font_family", p.color("primary_text_color"), title_right - text_x),
+            (p.artist_text() if p.flags["artist"] else "", "artist_size", "artist_font_family", color, title_right - text_x),
+        ],
+        gap=p.s * 4,
+        bottom=line_y - p.sz(9) if p.flags["progress"] or d.get("time_mode") == "split" else p.py(82),
+    )
     left, line_right = text_x, right
     if p.flags["time"] and d.get("time_mode") == "split":
         left, line_right = p.time_row(text_x, right, line_y, color)
@@ -763,12 +840,18 @@ def _paint_wave(p: _Painter) -> None:
     text_right = p.px(pad + card_w - 24)
     p.brand(text_right, p.py(pad + 20))
     brand_reserve = p.sz(120) if p.flags["brand"] else 0
-    if p.flags["artist"]:
-        p.text(text_x, p.py(pad + 24), p.artist_text(), p.font("artist_size", "artist_font_family"), p.color("secondary_text_color", 226), text_right - text_x - brand_reserve)
-    if p.flags["title"]:
-        p.text(text_x, p.py(pad + 46), p.info.title, p.font("title_size", "title_font_family"), p.color("primary_text_color"), text_right - text_x)
     centre = p.py(pad + 128)
     half = p.s * 30
+    p.stack_text(
+        text_x,
+        p.py(pad + 24),
+        [
+            (p.artist_text() if p.flags["artist"] else "", "artist_size", "artist_font_family", p.color("secondary_text_color", 226), text_right - text_x - brand_reserve),
+            (p.info.title if p.flags["title"] else "", "title_size", "title_font_family", p.color("primary_text_color"), text_right - text_x),
+        ],
+        gap=p.s * 6,
+        bottom=centre - half - p.sz(10),
+    )
     if p.flags["bars"]:
         p.bars(text_x, text_right, centre, half * 2, mode="mirror", width_ratio=0.55, min_pitch=4)
         p.bar_knob(text_x, centre - half - p.sz(6), centre + half + p.sz(6), max(2.0, p.s * 3))
