@@ -11,7 +11,7 @@ All notable changes are documented here. This project follows [Keep a Changelog]
 - Player preset library: save, apply, rename, delete, export and import complete styles (`.tviz-preset.json`).
 - DJ-mix handling: overlapping clips across audio tracks form one row of players with a selectable switch point (middle of the crossfade, next track start, current track end); clips that play entirely inside another track are skipped.
 - Time and progress follow trims on either side; progress can show the position in the whole track or in the clip.
-- Non-blocking panel: skin, palette and preset are chosen on the main Players page next to a large preview and apply immediately; Look holds fine-tuning with color swatches, Library holds presets and palettes, Service holds the log and language. Live progress, Cancel while running and two-click player removal.
+- Non-blocking panel: preset, skin and palette are chosen (in that order) on the main Players page next to a large preview and apply immediately; each preset shows the skin it switches to, and a note names the active preset until the skin or palette is changed; Look holds fine-tuning with color swatches, Library holds presets and palettes, Service holds the log and language. Live progress, Cancel while running and two-click player removal.
 - Cleanup of helper timelines left by earlier preview builds.
 - Automatic Russian/English UI selection on first launch and a persisted language selector.
 - Private Windows x64 release-candidate packaging and a separate unpublished Linux x64 canary.

@@ -661,6 +661,8 @@ local I18N = {
         ["hint.video_track_tip"] = "Players are placed on this video track. Use an empty track.",
         ["field.preset"] = "Preset",
         ["preset.current_style"] = "Custom settings",
+        ["preset.option"] = "{name}  ·  {skin}",
+        ["preset.summary"] = "Skin and palette come from preset \"{name}\". Changing them switches to custom settings.",
         ["field.active_style"] = "{skin} · {palette}",
         ["action.create"] = "Create players",
         ["action.cancel"] = "Cancel",
@@ -908,6 +910,8 @@ local I18N = {
         ["hint.video_track_tip"] = "На эту видеодорожку встанут плееры. Лучше выбрать пустую.",
         ["field.preset"] = "Пресет",
         ["preset.current_style"] = "Свои настройки",
+        ["preset.option"] = "{name}  ·  {skin}",
+        ["preset.summary"] = "Скин и палитра взяты из пресета «{name}». Если их изменить, включатся свои настройки.",
         ["field.active_style"] = "{skin} · {palette}",
         ["action.create"] = "Создать плееры",
         ["action.cancel"] = "Отмена",
@@ -4164,6 +4168,17 @@ function Editor.reset_quick_preset()
     Editor.suppress = true
     Editor.set_combo("QuickPreset", 0)
     Editor.suppress = was
+    Editor.update_preset_summary()
+end
+
+function Editor.update_preset_summary()
+    local label = win and win:Find("PresetSummary") or nil
+    local row = win and win:Find("PresetSummaryRow") or nil
+    if not label or not row then return end
+    local text = Editor.active_preset and tr("preset.summary", { name = Editor.active_preset }) or ""
+    pcall(function() label.Text = text end)
+    pcall(function() row.Hidden = text == "" end)
+    pcall(function() win:RecalcLayout() end)
 end
 
 function Editor.update_capabilities()
@@ -4324,7 +4339,7 @@ function Presets.refresh(selected_name)
     local quick = { tr("preset.current_style") }
     local quick_index = 0
     for position, preset in ipairs(Settings.data.presets) do
-        table.insert(quick, preset.name)
+        table.insert(quick, tr("preset.option", { name = preset.name, skin = Style.skin_label(preset.skin) }))
         if preset.name == Editor.active_preset then quick_index = position end
     end
     Editor.fill_combo("QuickPreset", quick, quick_index)
@@ -4342,6 +4357,7 @@ function Presets.apply(preset)
     Editor.select_skin(preset.skin)
     Editor.active_preset = preset.name
     Presets.refresh(preset.name)
+    Editor.update_preset_summary()
     append_log(tr("log.preset_applied", { name = preset.name }))
 end
 
@@ -4363,6 +4379,7 @@ function Presets.save()
     save_current_style()
     Editor.active_preset = name
     Presets.refresh(name)
+    Editor.update_preset_summary()
     append_log(tr("log.preset_saved", { name = name }))
 end
 
@@ -4719,10 +4736,14 @@ end
 function App.build_create_page(fonts)
     local controls = ui:VGroup({ Weight = 1, Spacing = 8 }, {
         App.section(tr("section.style_summary"), fonts),
-        App.row(tr("field.skin"), { ui:ComboBox({ ID = "SkinSelector", MinimumSize = { 250, 28 }, Weight = 0 }) }),
-        App.row(tr("field.palette"), { ui:ComboBox({ ID = "PaletteSelector", MinimumSize = { 250, 28 }, Weight = 0 }) }),
         App.row(tr("field.preset"), {
             ui:ComboBox({ ID = "QuickPreset", MinimumSize = { 250, 28 }, Weight = 0, ToolTip = tr("presets.hint") }),
+        }, nil, tr("presets.hint")),
+        App.row(tr("field.skin"), { ui:ComboBox({ ID = "SkinSelector", MinimumSize = { 250, 28 }, Weight = 0 }) }),
+        App.row(tr("field.palette"), { ui:ComboBox({ ID = "PaletteSelector", MinimumSize = { 250, 28 }, Weight = 0 }) }),
+        ui:HGroup({ ID = "PresetSummaryRow", Hidden = true, Weight = 0, Spacing = 8 }, {
+            ui:Label({ Text = "", MinimumSize = { App.LABEL_WIDTH, 0 }, MaximumSize = { App.LABEL_WIDTH, 16777215 }, Weight = 0 }),
+            ui:Label({ ID = "PresetSummary", Text = "", Font = fonts.hint, WordWrap = true, MinimumSize = { 0, 36 }, Weight = 1, StyleSheet = App.widget_styles.muted }),
         }),
         App.row("", {
             ui:Button({ ID = "OpenStyle", Text = tr("action.customize") .. "  >", Flat = true, Weight = 0, StyleSheet = App.widget_styles.link }),
@@ -5125,6 +5146,7 @@ function App.populate()
     Editor.apply(Settings.data.styles[Settings.data.active_skin])
     Editor.refresh_palette_combos()
     Presets.refresh()
+    Editor.update_preset_summary()
     App.show_page(0)
     App.show_style_page(0)
     Log.refresh_widget()
