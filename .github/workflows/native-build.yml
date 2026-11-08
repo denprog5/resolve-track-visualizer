@@ -259,7 +259,7 @@ jobs:
           PY
 
       - name: Upload internal dependency corresponding sources
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: internal-native-sources-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
           path: build/dependency-source/*
@@ -824,7 +824,7 @@ jobs:
 
       - name: Upload internal Windows target transfer artifact
         if: inputs.target == 'windows-x64'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: internal-native-transfer-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
           path: ${{ env.TVIZ_RELEASE_DIR }}/*
@@ -865,7 +865,7 @@ jobs:
 
       - name: Upload internal Linux target transfer artifact
         if: inputs.target == 'linux-x64'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: internal-native-transfer-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.target }}
           path: ${{ env.TVIZ_RELEASE_DIR }}/*
@@ -1097,7 +1097,7 @@ jobs:
           PY
 
       - name: Upload assembled release bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: resolve-track-visualizer-${{ needs.prepare.outputs.version }}-${{ inputs.channel }}-${{ inputs.target }}
           path: release-bundle
