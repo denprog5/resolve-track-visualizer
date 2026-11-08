@@ -587,9 +587,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "python scripts/release_notes.py",
             'gh release create "v${VERSION}"',
             '--target "$GITHUB_SHA"',
-            "release-bundle/source/*",
+            "release-bundle/source/*.tar.*",
         ):
             self.assertIn(fragment, publish)
+        # Only the source archives are release assets, not the internal transfer checksums.
+        self.assertNotIn("release-bundle/source/* ", publish)
         self.assertLess(publish.index("sha256sum -c SHA256SUMS"), publish.index("make_update_manifest.py"))
         self.assertLess(publish.index("make_update_manifest.py"), publish.index("gh release create"))
         self.assertIn("default: false", self.release_workflow)

@@ -91,5 +91,5 @@ jobs:
             --notes-file release-notes.md \
             "${prerelease[@]}" \
             release-bundle/artifacts/* \
-            release-bundle/source/* \
+            release-bundle/source/*.tar.* \
             release-bundle/SHA256SUMS
