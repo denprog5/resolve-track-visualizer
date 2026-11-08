@@ -32,7 +32,10 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: build
-    if: ${{ inputs.publish }}
+    # Publishing signs update.json, so it runs only from main and only in the protected
+    # `release` environment that holds TVIZ_UPDATE_SIGNING_KEY.
+    if: ${{ inputs.publish && github.ref == 'refs/heads/main' }}
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

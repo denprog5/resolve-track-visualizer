@@ -576,7 +576,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(self.release_workflow.count("contents: write"), 1)
         for fragment in (
             "needs: build",
-            "if: ${{ inputs.publish }}",
+            "if: ${{ inputs.publish && github.ref == 'refs/heads/main' }}",
+            "environment: release",
             "contents: write",
             "name: resolve-track-visualizer-${{ inputs.version }}-release-candidate-windows-x64",
             "sha256sum -c SHA256SUMS",

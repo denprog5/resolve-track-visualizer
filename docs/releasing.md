@@ -39,7 +39,7 @@ The panel then runs the installer silently with `--no-pause --result-file`, but 
 
 ### Update signing key
 
-`update.json` is signed with an Ed25519 private key stored only in the `TVIZ_UPDATE_SIGNING_KEY` Actions secret (64 hex characters) and in an offline backup kept by the maintainer. The matching public key is `PUBLIC_KEY_HEX` in `davinci_track_visualizer/updater.py`; `make_update_manifest.py` refuses to publish a manifest that the embedded key does not verify.
+`update.json` is signed with an Ed25519 private key stored only in the `TVIZ_UPDATE_SIGNING_KEY` secret of the `release` GitHub environment (64 hex characters) and in an offline backup kept by the maintainer. The environment accepts deployments only from `main`, and the publish job also refuses any other ref, so code from another branch never receives the key. The matching public key is `PUBLIC_KEY_HEX` in `davinci_track_visualizer/updater.py`; `make_update_manifest.py` refuses to publish a manifest that the embedded key does not verify.
 
 - Never commit the private key or print it in a workflow log.
 - To rotate it, generate a new key pair, ship a release whose updater embeds the new public key while still signing with the old key, then switch the secret to the new key for later releases.
