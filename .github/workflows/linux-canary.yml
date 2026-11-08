@@ -6,7 +6,7 @@ on:
       version:
         description: Version matching davinci_track_visualizer.__version__
         required: true
-        default: 0.1.0
+        default: 0.9.0
         type: string
 
 permissions:

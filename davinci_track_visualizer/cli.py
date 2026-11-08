@@ -9,7 +9,7 @@ import sys
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -277,6 +277,7 @@ def _prepare_track(
         offset_seconds=offset,
         total_seconds=total,
         texts=tuple(layers.texts),
+        title_scroll=replace(layers.title_scroll, path=paths["title"]) if layers.title_scroll and paths["title"] else None,
     )
     comp_hash = _content_hash({"layers": stem, "timing": [job.duration_frames, jobs.fps, round(offset, 6), round(total, 6)], "texts": [t.__dict__ for t in layers.texts]})
     comp_path = write_comp(comp_dir / f"{stem}_{comp_hash[:8]}.comp", spec)
@@ -410,6 +411,23 @@ def command_catalog(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_update(args: argparse.Namespace) -> int:
+    from .updater import check_for_update
+
+    def progress(percent: int) -> None:
+        _emit(f"TVIZ_UPDATE_PROGRESS {percent}")
+
+    result = check_for_update(
+        Path(args.install_root),
+        download=args.download,
+        current=args.current_version,
+        source_dir=Path(args.source_dir) if args.source_dir else None,
+        progress=progress,
+    )
+    _emit("TVIZ_UPDATE " + json.dumps(result, ensure_ascii=False))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="davinci-track-visualizer", description="Track Visualizer engine for DaVinci Resolve")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -448,6 +466,13 @@ def build_parser() -> argparse.ArgumentParser:
     catalog_parser = subparsers.add_parser("catalog", help="Print skins, defaults and palettes as JSON")
     catalog_parser.add_argument("--out", help="Write to a file instead of stdout")
     catalog_parser.set_defaults(func=command_catalog)
+
+    update = subparsers.add_parser("update", help="Check for a signed update and optionally download its installer")
+    update.add_argument("--install-root", required=True, help="Installed application directory (holds manifest.json)")
+    update.add_argument("--download", action="store_true", help="Download and verify the installer when a newer version exists")
+    update.add_argument("--current-version", help="Override the installed version (testing)")
+    update.add_argument("--source-dir", help="Read update.json and the installer from this directory (testing; the signature is still required)")
+    update.set_defaults(func=command_update)
     return parser
 
 

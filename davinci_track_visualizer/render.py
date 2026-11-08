@@ -9,6 +9,9 @@ A player is split into layers so Resolve only has to animate cheap things:
 * ``knob``   – the progress handle at the start position. Fusion moves it horizontally.
 * time readouts – :class:`~davinci_track_visualizer.fusion_comp.TextSpec` entries drawn by
   Fusion TextPlus nodes (and by Pillow for previews).
+* ``title``  – only when the title is wider than its line: a strip that Fusion scrolls inside
+  the line (see :class:`~davinci_track_visualizer.fusion_comp.TitleScroll`). The card then has
+  no title of its own.
 
 Every layer is a full-frame RGBA image at timeline resolution with the player already at its
 final position, so the Fusion composition needs no transforms besides the knob offset.
@@ -26,7 +29,7 @@ from typing import Any, Mapping, Sequence
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
-from .fusion_comp import TextSpec, format_clock
+from .fusion_comp import TextSpec, TitleScroll, format_clock
 from .skins import (
     SKIN_BASE_SIZES,
     SUPPORTED_SKINS,
@@ -36,7 +39,10 @@ from .skins import (
     normalize_design,
 )
 
-RENDERER_REVISION = 3
+RENDERER_REVISION = 4
+# Scrolling titles: speed in base-size pixels per second and the rest before each pass.
+TITLE_SCROLL_SPEED = 60.0
+TITLE_SCROLL_PAUSE = 2.5
 FontType = ImageFont.FreeTypeFont | ImageFont.ImageFont
 
 __all__ = [
@@ -69,6 +75,8 @@ class PlayerLayers:
     progress_x2: float
     texts: list[TextSpec] = field(default_factory=list)
     bounds: tuple[int, int, int, int] = (0, 0, 0, 0)
+    title: Image.Image | None = None
+    title_scroll: TitleScroll | None = None
 
 
 # --------------------------------------------------------------------------------------------
@@ -383,6 +391,8 @@ class _Painter:
         self.knob: Image.Image | None = None
         self.progress: tuple[float, float] | None = None
         self.texts: list[TextSpec] = []
+        self.title: Image.Image | None = None
+        self.title_scroll: TitleScroll | None = None
         self.x, self.y, self.w, self.h, self.s = player_bounds(design, skin, width, height)
 
     # coordinates -------------------------------------------------------------------------
@@ -509,11 +519,59 @@ class _Painter:
             factor = max(0.55, factor * min(0.97, (bottom - top) / height))
             fonts, boxes, height = measure(factor)
         y = top + max(0.0, (bottom - top - height) / 2) if center and bottom is not None else top
-        for (text, _, _, fill, max_width), font, (box_top, box_bottom) in zip(lines, fonts, boxes):
+        for (text, size_key, _, fill, max_width), font, (box_top, box_bottom) in zip(lines, fonts, boxes):
             baseline = y - box_top
-            self.text(x, baseline, text, font, fill, max_width, anchor="ls")
+            if size_key == "title_size" and self.design.get("scroll_title", True) and self._overflows(text, font, max_width):
+                self.scrolling_title(x, baseline, text, font, fill, max_width, box_top, box_bottom)
+            else:
+                self.text(x, baseline, text, font, fill, max_width, anchor="ls")
             y = baseline + box_bottom + gap
         return y - gap
+
+    def _overflows(self, text: str, font: FontType, max_width: float) -> bool:
+        draw = ImageDraw.Draw(self.card)
+        return draw.textlength(_safe_text(draw, text, font), font=font) > max(1.0, max_width)
+
+    def scrolling_title(
+        self,
+        x: float,
+        baseline: float,
+        text: str,
+        font: FontType,
+        fill: tuple[int, int, int, int],
+        max_width: float,
+        box_top: float,
+        box_bottom: float,
+    ) -> None:
+        """Render a title that does not fit as a looping strip instead of truncating it."""
+        draw = ImageDraw.Draw(self.card)
+        text = _safe_text(draw, text, font)
+        length = draw.textlength(text, font=font)
+        pad = self.sz(6)
+        cycle = float(math.ceil(length + self.sz(56)))
+        top = math.floor(baseline + box_top) - pad
+        width = int(math.ceil(pad + cycle + length + pad))
+        height = int(math.ceil(baseline + box_bottom)) + pad - top
+        # Even sizes keep the strip centre on whole pixels in Fusion, so the text stays sharp.
+        width += width % 2
+        height += height % 2
+        strip = _blank(width, height)
+        strip_draw = ImageDraw.Draw(strip)
+        for start in (pad, pad + cycle):
+            strip_draw.text((start, baseline - top), text, font=font, fill=fill, anchor="ls")
+        left = float(math.floor(x) - pad)
+        self.title = strip
+        self.title_scroll = TitleScroll(
+            left=left,
+            top=float(top),
+            width=width,
+            height=height,
+            window_left=float(math.floor(x) - self.sz(2)),
+            window_right=float(x + max_width),
+            cycle=cycle,
+            speed=TITLE_SCROLL_SPEED * self.s,
+            pause=TITLE_SCROLL_PAUSE,
+        )
 
     def artist_text(self) -> str:
         artist = self.info.artist or ""
@@ -648,6 +706,8 @@ class _Painter:
             progress_x2=float(x2),
             texts=list(self.texts),
             bounds=(self.x, self.y, self.w, self.h),
+            title=self.title,
+            title_scroll=self.title_scroll,
         )
 
 
@@ -892,8 +952,8 @@ def render_track_layers(
     layers = compose_player(info, levels, design, skin, width, height)
     directory = Path(out_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    paths: dict[str, str | None] = {"card": None, "played": None, "knob": None}
-    for name, image in (("card", layers.card), ("played", layers.played), ("knob", layers.knob)):
+    paths: dict[str, str | None] = {"card": None, "played": None, "knob": None, "title": None}
+    for name, image in (("card", layers.card), ("played", layers.played), ("knob", layers.knob), ("title", layers.title)):
         if image is None:
             continue
         target = directory / f"{stem}_{name}.png"
@@ -935,10 +995,25 @@ def readout_text(kind: str, elapsed: float, total: float) -> str:
     return format_clock(elapsed, with_hours)
 
 
-def flatten_player(layers: PlayerLayers, progress: float, elapsed: float, total: float) -> Image.Image:
-    """Composite the layers as Fusion would at ``progress`` (0..1)."""
+def _draw_title_scroll(frame: Image.Image, strip: Image.Image, scroll: TitleScroll, moved: float) -> None:
+    window = (int(round(scroll.window_left)), 0, int(round(scroll.window_right)), frame.height)
+    layer = _blank(*frame.size)
+    layer.paste(strip, (int(round(scroll.left - moved)), int(round(scroll.top))), strip)
+    clip = Image.new("L", frame.size, 0)
+    ImageDraw.Draw(clip).rectangle((window[0], window[1], window[2] - 1, window[3]), fill=255)
+    layer.putalpha(ImageChops.multiply(layer.getchannel("A"), clip))
+    frame.alpha_composite(layer)
+
+
+def flatten_player(layers: PlayerLayers, progress: float, elapsed: float, total: float, scroll_seconds: float = 0.0) -> Image.Image:
+    """Composite the layers as Fusion would at ``progress`` (0..1).
+
+    ``scroll_seconds`` is the time since the clip start, which positions a scrolling title.
+    """
     progress = max(0.0, min(1.0, progress))
     frame = layers.card.copy()
+    if layers.title is not None and layers.title_scroll is not None:
+        _draw_title_scroll(frame, layers.title, layers.title_scroll, layers.title_scroll.offset(scroll_seconds))
     span = layers.progress_x2 - layers.progress_x1
     if layers.played is not None and span > 0:
         reveal = int(round(layers.progress_x1 + span * progress))

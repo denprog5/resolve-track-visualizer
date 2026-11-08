@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       channel:
-        description: Private artifact channel
+        description: Artifact channel (release-candidate is published, canary stays private)
         required: true
         type: string
 
@@ -69,7 +69,7 @@ jobs:
       - name: Verify exact Python runtime
         run: python -c "import platform; expected='3.12.13'; actual=platform.python_version(); assert actual == expected, f'Expected Python {expected}, found {actual}'"
 
-      - name: Validate private build request
+      - name: Validate build request
         id: version
         env:
           CHANNEL: ${{ inputs.channel }}
@@ -89,8 +89,10 @@ jobs:
           if not match:
               raise SystemExit("Could not read davinci_track_visualizer.__version__")
           source_version = match.group(1)
-          if os.environ["REPOSITORY_VISIBILITY"] != "private":
-              raise SystemExit("Unsigned artifacts may be built only in a private repository")
+          # Windows release candidates are published as GitHub Releases; the Linux canary is
+          # unpublished and may be built only while the repository is private.
+          if os.environ["REPOSITORY_VISIBILITY"] != "private" and os.environ["CHANNEL"] != "release-candidate":
+              raise SystemExit("Unpublished canary artifacts may be built only in a private repository")
           request = (os.environ["TARGET"], os.environ["CHANNEL"])
           allowed = {
               ("windows-x64", "release-candidate"),
@@ -228,6 +230,7 @@ jobs:
 
       - name: Re-query live repository visibility before source upload
         env:
+          CHANNEL: ${{ inputs.channel }}
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -247,11 +250,12 @@ jobs:
           )
           with urllib.request.urlopen(request, timeout=30) as response:
               repository = json.load(response)
-          if repository.get("visibility") != "private":
+          allowed = {"private", "public"} if os.environ["CHANNEL"] == "release-candidate" else {"private"}
+          if repository.get("visibility") not in allowed:
               raise SystemExit(
-                  f"Refusing unsigned artifact upload: live visibility is {repository.get('visibility')!r}"
+                  f"Refusing {os.environ['CHANNEL']} artifact upload: live visibility is {repository.get('visibility')!r}"
               )
-          print("Live repository visibility is private")
+          print(f"Live repository visibility is {repository.get('visibility')}")
           PY
 
       - name: Upload internal dependency corresponding sources
@@ -786,6 +790,7 @@ jobs:
       - name: Re-query live repository visibility before Windows target upload
         if: inputs.target == 'windows-x64'
         env:
+          CHANNEL: ${{ inputs.channel }}
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -806,11 +811,12 @@ jobs:
           )
           with urllib.request.urlopen(request, timeout=30) as response:
               repository = json.load(response)
-          if repository.get("visibility") != "private":
+          allowed = {"private", "public"} if os.environ["CHANNEL"] == "release-candidate" else {"private"}
+          if repository.get("visibility") not in allowed:
               raise SystemExit(
-                  f"Refusing unsigned artifact upload: live visibility is {repository.get('visibility')!r}"
+                  f"Refusing {os.environ['CHANNEL']} artifact upload: live visibility is {repository.get('visibility')!r}"
               )
-          print("Live repository visibility is private")
+          print(f"Live repository visibility is {repository.get('visibility')}")
           '@ | & $env:TVIZ_WINDOWS_PYTHON -
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
@@ -829,6 +835,7 @@ jobs:
       - name: Re-query live repository visibility before Linux target upload
         if: inputs.target == 'linux-x64'
         env:
+          CHANNEL: ${{ inputs.channel }}
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -848,11 +855,12 @@ jobs:
           )
           with urllib.request.urlopen(request, timeout=30) as response:
               repository = json.load(response)
-          if repository.get("visibility") != "private":
+          allowed = {"private", "public"} if os.environ["CHANNEL"] == "release-candidate" else {"private"}
+          if repository.get("visibility") not in allowed:
               raise SystemExit(
-                  f"Refusing unsigned artifact upload: live visibility is {repository.get('visibility')!r}"
+                  f"Refusing {os.environ['CHANNEL']} artifact upload: live visibility is {repository.get('visibility')!r}"
               )
-          print("Live repository visibility is private")
+          print(f"Live repository visibility is {repository.get('visibility')}")
           PY
 
       - name: Upload internal Linux target transfer artifact
@@ -1060,6 +1068,7 @@ jobs:
 
       - name: Re-query live repository visibility before assembled bundle upload
         env:
+          CHANNEL: ${{ inputs.channel }}
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -1079,11 +1088,12 @@ jobs:
           )
           with urllib.request.urlopen(request, timeout=30) as response:
               repository = json.load(response)
-          if repository.get("visibility") != "private":
+          allowed = {"private", "public"} if os.environ["CHANNEL"] == "release-candidate" else {"private"}
+          if repository.get("visibility") not in allowed:
               raise SystemExit(
-                  f"Refusing unsigned artifact upload: live visibility is {repository.get('visibility')!r}"
+                  f"Refusing {os.environ['CHANNEL']} artifact upload: live visibility is {repository.get('visibility')!r}"
               )
-          print("Live repository visibility is private")
+          print(f"Live repository visibility is {repository.get('visibility')}")
           PY
 
       - name: Upload assembled release bundle

@@ -205,6 +205,30 @@ class LuaPortabilityTests(unittest.TestCase):
         self.assertNotIn('"-Command"', picker)
         self.assertNotIn('"-EncodedCommand"', picker)
 
+    def test_windows_color_picker_uses_the_native_dialog_first(self) -> None:
+        dialog = self.source[
+            self.source.index("local function win32_color_api()") : self.source.index(
+                "-- Mirror of davinci_track_visualizer.skins.catalog()"
+            )
+        ]
+        self.assertIn("int __stdcall ChooseColorW(tviz_CHOOSECOLORW_V1 *chooseColor);", dialog)
+        self.assertIn('ffi.load, "comdlg32"', dialog)
+        # fuscript.exe starts minimized; the hook restores the dialog and brings it forward.
+        self.assertIn("user32.ShowWindow(dialog, 9)", dialog)
+        self.assertIn("user32.SetForegroundWindow(dialog)", dialog)
+        self.assertIn("0x00000010", dialog)  # CC_ENABLEHOOK
+        self.assertIn('require("jit").off(win32_choose_color)', dialog)
+        picker = self.source[
+            self.source.index("local function apply_picked_color") : self.source.index(
+                "local function frame(value)"
+            )
+        ]
+        self.assertIn("local chosen, dialog_error = win32_choose_color(r, g, b, swatches)", picker)
+        self.assertIn("if chosen == false then return end", picker)
+        # Saving before Editor.changed() made the change look like a no-op: no swatch or preview update.
+        apply = picker[: picker.index("local function pick_windows_color")]
+        self.assertNotIn("save_current_style", apply)
+
     def test_windows_color_picker_does_not_override_execution_policy(self) -> None:
         self.assertNotIn("ExecutionPolicy", self.source)
         self.assertNotRegex(self.source, r'(?i)["\']bypass["\']')

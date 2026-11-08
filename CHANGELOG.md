@@ -2,10 +2,15 @@
 
 All notable changes are documented here. This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for release tags.
 
-## [0.1.0] - Unreleased
+## [0.9.0] - 2026-11-08
 
 ### Added
 
+- Signed automatic updates. The panel checks the latest GitHub Release when it opens (at most every six hours), verifies the release's Ed25519-signed `update.json` and the installer's size and SHA-256, and installs the update silently while no players are being created. Settings, presets and palettes are kept. Copies installed before 0.9.0 need this installer once by hand.
+- Service → Updates: the installed version, Check for updates, and a switch to turn automatic updates off.
+- Long track titles that do not fit their line scroll in every skin, pausing at the start of each loop, so the whole title can be read. Look → Scroll long titles turns it off.
+- The installer accepts `--result-file` to report the outcome as JSON.
+- Windows releases are published on GitHub Releases with the installer, portable archive, SBOM, signed update manifest, checksums and corresponding sources.
 - Music player overlays for timeline audio clips with Classic, Minimal, Portrait Glass, Compact and Wave skins.
 - Fourteen built-in palettes, including Lavender (the Portrait Glass default), plus user palettes that work with every skin.
 - Player preset library: save, apply, rename, delete, export and import complete styles (`.tviz-preset.json`).
@@ -15,7 +20,7 @@ All notable changes are documented here. This project follows [Keep a Changelog]
 - A warning on the Players page and in the log when the project's playback frame rate differs from the timeline frame rate, which makes Resolve play at the wrong speed with crackling audio. The plugin does not change project settings.
 - Cleanup of helper timelines left by earlier preview builds.
 - Automatic Russian/English UI selection on first launch and a persisted language selector.
-- Private Windows x64 release-candidate packaging and a separate unpublished Linux x64 canary.
+- Windows x64 release packaging and a separate unpublished Linux x64 canary.
 - Reproducible minimal FFmpeg source builds with checksums and SBOMs.
 - Localized non-destructive uninstall support and atomic runtime upgrades.
 - The installer upgrades preview builds that were installed before the install manifest existed, when the runtime files and the Resolve script clearly belong to that install root; settings, logs and outputs are kept. Previously it stopped with "Managed-looking files exist without a valid owned installed manifest".
@@ -50,3 +55,4 @@ All notable changes are documented here. This project follows [Keep a Changelog]
 - Player size drift between timeline resolutions.
 - Installer preservation of nested dependency license files.
 - PowerShell color-picker launch no longer overrides the configured execution policy.
+- Clicking a color swatch opens the Windows color dialog immediately, in front of the panel and with the palette's colors as custom colors; it previously opened late or behind Resolve through PowerShell. The picked color now also updates the swatch and the preview.

@@ -211,6 +211,107 @@ local function win32_environment_value(name)
     return win32_utf8(buffer, copied)
 end
 
+-- The system color dialog, shown in-process: it opens instantly over the panel, unlike a
+-- PowerShell dialog, which takes seconds to start and can open behind Resolve.
+local WIN32_COLOR = { attempted = false, custom = nil }
+
+local function win32_color_api()
+    if WIN32_COLOR.attempted then
+        if WIN32_COLOR.comdlg32 then return WIN32_COLOR end
+        return nil, WIN32_COLOR.error
+    end
+    WIN32_COLOR.attempted = true
+    local api, api_error = win32_api()
+    if not api then
+        WIN32_COLOR.error = api_error
+        return nil, api_error
+    end
+    local ffi = api.ffi
+    local declared = pcall(function() return ffi.typeof("tviz_CHOOSECOLORW_V1") end)
+    if not declared then
+        local cdef_ok, cdef_error = pcall(function()
+            ffi.cdef[[
+                typedef struct tviz_CHOOSECOLORW_V1 {
+                    uint32_t lStructSize;
+                    void *hwndOwner;
+                    void *hInstance;
+                    uint32_t rgbResult;
+                    uint32_t *lpCustColors;
+                    uint32_t Flags;
+                    intptr_t lCustData;
+                    void *lpfnHook;
+                    const uint16_t *lpTemplateName;
+                } tviz_CHOOSECOLORW_V1;
+                typedef uintptr_t (__stdcall *tviz_CCHOOKPROC_V1)(void *dialog, uint32_t message, uintptr_t wparam, intptr_t lparam);
+                int __stdcall ChooseColorW(tviz_CHOOSECOLORW_V1 *chooseColor);
+                void * __stdcall GetForegroundWindow(void);
+                int __stdcall ShowWindow(void *window, int command);
+                int __stdcall SetForegroundWindow(void *window);
+                int __stdcall PostMessageW(void *window, uint32_t message, uintptr_t wparam, intptr_t lparam);
+            ]]
+        end)
+        if not cdef_ok then
+            WIN32_COLOR.error = "Color dialog declarations failed: " .. tostring(cdef_error)
+            return nil, WIN32_COLOR.error
+        end
+    end
+    local comdlg_ok, comdlg32 = pcall(ffi.load, "comdlg32")
+    local user_ok, user32 = pcall(ffi.load, "user32")
+    if not comdlg_ok or not user_ok then
+        WIN32_COLOR.error = "comdlg32/user32 unavailable: " .. tostring(comdlg_ok and user32 or comdlg32)
+        return nil, WIN32_COLOR.error
+    end
+    WIN32_COLOR.ffi = ffi
+    WIN32_COLOR.comdlg32 = comdlg32
+    WIN32_COLOR.user32 = user32
+    WIN32_COLOR.custom = ffi.new("uint32_t[16]")
+    -- fuscript.exe, which runs this panel, starts minimized, and the dialog inherits that state:
+    -- restore it and bring it to the front whenever it would open or end up minimized.
+    local restore_message = 0x8001
+    WIN32_COLOR.hook = ffi.cast("tviz_CCHOOKPROC_V1", function(dialog, message, wparam)
+        if message == 0x0110 then -- WM_INITDIALOG
+            user32.PostMessageW(dialog, restore_message, 0, 0)
+            return 1
+        elseif message == 0x0005 and tonumber(wparam) == 1 then -- WM_SIZE, SIZE_MINIMIZED
+            user32.PostMessageW(dialog, restore_message, 0, 0)
+        elseif message == restore_message then
+            user32.ShowWindow(dialog, 9) -- SW_RESTORE
+            user32.SetForegroundWindow(dialog)
+            return 1
+        end
+        return 0
+    end)
+    return WIN32_COLOR
+end
+
+-- Returns the chosen color as {r, g, b}, false when the user cancels, or nil and an error.
+-- ``swatches`` (up to 16 {r, g, b}) fill the dialog's custom colors the first time.
+local function win32_choose_color(r, g, b, swatches)
+    local api, api_error = win32_color_api()
+    if not api then return nil, api_error end
+    local function colorref(cr, cg, cb) return cr + cg * 256 + cb * 65536 end
+    if not api.seeded then
+        api.seeded = true
+        for index, color in ipairs(swatches or {}) do
+            if index > 16 then break end
+            api.custom[index - 1] = colorref(color[1], color[2], color[3])
+        end
+    end
+    local dialog = api.ffi.new("tviz_CHOOSECOLORW_V1")
+    dialog.lStructSize = api.ffi.sizeof(dialog)
+    dialog.hwndOwner = api.user32.GetForegroundWindow()
+    dialog.rgbResult = colorref(r, g, b)
+    dialog.lpCustColors = api.custom
+    dialog.lpfnHook = api.hook
+    -- CC_RGBINIT | CC_FULLOPEN | CC_ENABLEHOOK | CC_ANYCOLOR
+    dialog.Flags = 0x00000001 + 0x00000002 + 0x00000010 + 0x00000100
+    if api.comdlg32.ChooseColorW(dialog) == 0 then return false end
+    local value = tonumber(dialog.rgbResult)
+    return { value % 256, math.floor(value / 256) % 256, math.floor(value / 65536) % 256 }
+end
+-- The dialog calls back into Lua (the hook), which LuaJIT allows only from interpreted code.
+pcall(function() require("jit").off(win32_choose_color) end)
+
 -- Mirror of davinci_track_visualizer.skins.catalog(); tests/test_lua_catalog.py keeps it in sync.
 -- BEGIN GENERATED SKIN_CATALOG (scripts/sync_lua_catalog.py)
 local SKIN_CATALOG = {
@@ -222,7 +323,7 @@ local SKIN_CATALOG = {
         portrait_glass = { 420, 640 },
         wave = { 720, 208 },
     },
-    bool_keys = { "show_cover", "show_artist", "show_title", "show_brand", "show_time", "show_progress", "show_knob", "show_bars", "glass_enabled", "uppercase_artist", "time_bold" },
+    bool_keys = { "show_cover", "show_artist", "show_title", "show_brand", "show_time", "show_progress", "show_knob", "show_bars", "glass_enabled", "uppercase_artist", "time_bold", "scroll_title" },
     color_keys = { "panel_color", "border_color", "primary_text_color", "secondary_text_color", "accent_color", "track_color" },
     default_palettes = {
         classic = "Default",
@@ -253,6 +354,7 @@ local SKIN_CATALOG = {
             progress_basis = "track",
             progress_style = "wave",
             scale = 100,
+            scroll_title = true,
             secondary_text_color = "#EEF3F5",
             show_artist = true,
             show_bars = true,
@@ -291,6 +393,7 @@ local SKIN_CATALOG = {
             progress_basis = "track",
             progress_style = "wave",
             scale = 100,
+            scroll_title = true,
             secondary_text_color = "#A7E8D3",
             show_artist = true,
             show_bars = true,
@@ -329,6 +432,7 @@ local SKIN_CATALOG = {
             progress_basis = "track",
             progress_style = "wave",
             scale = 100,
+            scroll_title = true,
             secondary_text_color = "#F2A900",
             show_artist = true,
             show_bars = true,
@@ -367,6 +471,7 @@ local SKIN_CATALOG = {
             progress_basis = "track",
             progress_style = "wave",
             scale = 100,
+            scroll_title = true,
             secondary_text_color = "#D8CCF2",
             show_artist = true,
             show_bars = true,
@@ -405,6 +510,7 @@ local SKIN_CATALOG = {
             progress_basis = "track",
             progress_style = "wave",
             scale = 100,
+            scroll_title = true,
             secondary_text_color = "#AEBBDD",
             show_artist = true,
             show_bars = true,
@@ -748,6 +854,7 @@ local I18N = {
         ["field.bars"] = "Waveform",
         ["field.glass"] = "Glass",
         ["field.uppercase_artist"] = "Artist in capitals",
+        ["field.scroll_title"] = "Scroll long titles",
         ["field.time_mode"] = "Time display",
         ["time_mode.elapsed_total"] = "Elapsed / total",
         ["time_mode.split"] = "Elapsed and total at the ends",
@@ -797,6 +904,21 @@ local I18N = {
         ["action.palette_save"] = "Save current colors",
         ["action.palette_delete"] = "Delete",
         ["palette.custom_mark"] = "{name} (mine)",
+        ["section.updates"] = "Updates",
+        ["field.auto_update"] = "Update automatically",
+        ["action.check_updates"] = "Check now",
+        ["update.version"] = "Installed version: {version}",
+        ["update.dev_install"] = "Updates work only for Windows installs made with the installer.",
+        ["update.checking"] = "Checking for updates...",
+        ["update.downloading"] = "Downloading the update: {percent}%",
+        ["update.up_to_date"] = "You have the latest version ({version}).",
+        ["update.ready"] = "Version {version} is downloaded and verified. It installs as soon as the panel is idle.",
+        ["update.installing"] = "Installing the update... This takes a few seconds.",
+        ["update.installing_version"] = "Installing update {version}",
+        ["update.installed"] = "Updated to {version}. Close and reopen Track Visualizer to use the new version.",
+        ["update.reopen"] = "Track Visualizer was updated to {version}. Close and reopen the panel first.",
+        ["update.failed"] = "Update failed; the current version is kept: {details}",
+        ["update.install_timeout"] = "the installer did not finish in 10 minutes",
         ["log.preset_saved"] = "Preset saved: {name}",
         ["log.preset_applied"] = "Preset applied: {name}",
         ["log.preset_deleted"] = "Preset deleted: {name}",
@@ -1001,6 +1123,7 @@ local I18N = {
         ["field.bars"] = "Волна",
         ["field.glass"] = "Стекло",
         ["field.uppercase_artist"] = "Исполнитель заглавными",
+        ["field.scroll_title"] = "Прокручивать длинное название",
         ["field.time_mode"] = "Показ времени",
         ["time_mode.elapsed_total"] = "Прошло / всего",
         ["time_mode.split"] = "Прошло и всего по краям",
@@ -1050,6 +1173,21 @@ local I18N = {
         ["action.palette_save"] = "Сохранить текущие цвета",
         ["action.palette_delete"] = "Удалить",
         ["palette.custom_mark"] = "{name} (моя)",
+        ["section.updates"] = "Обновления",
+        ["field.auto_update"] = "Обновлять автоматически",
+        ["action.check_updates"] = "Проверить сейчас",
+        ["update.version"] = "Установлена версия {version}",
+        ["update.dev_install"] = "Обновления работают только для установки через установщик в Windows.",
+        ["update.checking"] = "Проверяю обновления...",
+        ["update.downloading"] = "Скачиваю обновление: {percent}%",
+        ["update.up_to_date"] = "У вас последняя версия ({version}).",
+        ["update.ready"] = "Версия {version} скачана и проверена. Установится, как только панель освободится.",
+        ["update.installing"] = "Устанавливаю обновление... Это займёт несколько секунд.",
+        ["update.installing_version"] = "Устанавливаю обновление {version}",
+        ["update.installed"] = "Обновлено до {version}. Закройте и снова откройте Track Visualizer, чтобы работать в новой версии.",
+        ["update.reopen"] = "Track Visualizer обновлён до {version}. Сначала закройте и снова откройте панель.",
+        ["update.failed"] = "Не удалось обновиться, текущая версия сохранена: {details}",
+        ["update.install_timeout"] = "установщик не завершился за 10 минут",
         ["log.preset_saved"] = "Пресет сохранён: {name}",
         ["log.preset_applied"] = "Пресет применён: {name}",
         ["log.preset_deleted"] = "Пресет удалён: {name}",
@@ -2099,6 +2237,8 @@ function Settings.defaults(existing_settings)
         fallback_logo_path = default_fallback_logo_path(),
         -- Releases before localization were Russian-only, so migrate their settings explicitly to Russian.
         language_mode = existing_settings and "ru" or "auto",
+        auto_update = true,
+        update_checked_at = 0,
     }
 end
 
@@ -2188,6 +2328,12 @@ local function load_settings()
     end
     if type(root.fallback_logo_path) == "string" and trim(root.fallback_logo_path) ~= "" then
         settings.fallback_logo_path = root.fallback_logo_path
+    end
+    if type(root.auto_update) == "boolean" then settings.auto_update = root.auto_update end
+    if tonumber(root.update_checked_at) then settings.update_checked_at = tonumber(root.update_checked_at) end
+    -- Testing only: read update.json and the installer from a folder. The signature is still required.
+    if type(root.update_source_dir) == "string" and trim(root.update_source_dir) ~= "" then
+        settings.update_source_dir = root.update_source_dir
     end
     if tonumber(root.settings_version) == SETTINGS_VERSION then
         if Style.is_skin(root.active_skin) then settings.active_skin = root.active_skin end
@@ -2299,6 +2445,9 @@ local function save_settings(settings)
         timeline = settings.timeline,
         fallback_logo_path = settings.fallback_logo_path,
         language_mode = settings.language_mode == "en" and "en" or settings.language_mode == "ru" and "ru" or "auto",
+        auto_update = settings.auto_update ~= false,
+        update_checked_at = tonumber(settings.update_checked_at) or 0,
+        update_source_dir = settings.update_source_dir,
     }
     write_settings_safely(settings_path(), json_encode(payload, ""))
 end
@@ -2410,6 +2559,51 @@ local function launch_runner_native(executable)
     local created = api.kernel32.CreateProcessW(
         application,
         nil,
+        nil,
+        nil,
+        0,
+        0x08000000,
+        nil,
+        working_directory,
+        startup,
+        process
+    )
+    if created == 0 then return false, win32_error("CreateProcessW", api) end
+    api.kernel32.CloseHandle(process[0].hThread)
+    api.kernel32.CloseHandle(process[0].hProcess)
+    return true
+end
+
+-- Quotes one argument for CommandLineToArgvW and the MSVC runtime.
+local function win32_quote_argument(value)
+    value = tostring(value or "")
+    if value ~= "" and not value:find('[%s"]') then return value end
+    local quoted = value:gsub('(\\*)"', function(slashes) return slashes .. slashes .. '\\"' end)
+    quoted = quoted:gsub("(\\+)$", "%1%1")
+    return '"' .. quoted .. '"'
+end
+
+-- Starts a console program without a window and without waiting (the self-update installer).
+local function launch_process_native(executable, arguments)
+    if not PLATFORM.windows then return false, "CreateProcessW is available only on Windows" end
+    local api, api_error = win32_api()
+    if not api then return false, api_error end
+    local parts = { win32_quote_argument(executable) }
+    for _, argument in ipairs(arguments or {}) do parts[#parts + 1] = win32_quote_argument(argument) end
+    local application, application_error = win32_utf16(executable)
+    if not application then return false, "Path conversion failed: " .. tostring(application_error) end
+    local command_line, command_error = win32_utf16(table.concat(parts, " "))
+    if not command_line then return false, "Command line conversion failed: " .. tostring(command_error) end
+    local working_directory, cwd_error = win32_utf16(dirname(executable))
+    if not working_directory then return false, "Working directory conversion failed: " .. tostring(cwd_error) end
+    local startup = api.ffi.new("tviz_STARTUPINFOW[1]")
+    startup[0].cb = api.ffi.sizeof(startup[0])
+    startup[0].dwFlags = 0x00000001
+    startup[0].wShowWindow = 0
+    local process = api.ffi.new("tviz_PROCESS_INFORMATION[1]")
+    local created = api.kernel32.CreateProcessW(
+        application,
+        command_line,
         nil,
         nil,
         0,
@@ -2678,14 +2872,28 @@ local function windows_powershell_path()
     return ""
 end
 
-local function pick_windows_color(field_id, fallback)
+-- The caller runs Editor.changed(), which stores the style, updates the swatch and the preview.
+-- Saving here first would make that change look like a no-op.
+local function apply_picked_color(field_id, selected)
+    selected = normalize_hex(selected, "")
+    if selected ~= "" then set_text(field_id, selected) end
+end
+
+local function pick_windows_color(field_id, fallback, swatches)
     if not PLATFORM.windows then error("Windows color picker called on a non-Windows platform") end
+    local current = normalize_hex(text_field(field_id, fallback), fallback)
+    local r, g, b = hex_to_rgb(current)
+    local chosen, dialog_error = win32_choose_color(r, g, b, swatches)
+    if chosen then
+        apply_picked_color(field_id, string.format("#%02X%02X%02X", chosen[1], chosen[2], chosen[3]))
+        return
+    end
+    if chosen == false then return end
+    append_log("Color dialog unavailable, using PowerShell: " .. tostring(dialog_error))
     local powershell_path = windows_powershell_path()
     if powershell_path == "" then
         error("Windows PowerShell was not found under SystemRoot or WINDIR")
     end
-    local current = normalize_hex(text_field(field_id, fallback), fallback)
-    local r, g, b = hex_to_rgb(current)
     local root = install_root()
     mkdir_p(root)
     local picker_stem = tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
@@ -2734,11 +2942,7 @@ local function pick_windows_color(field_id, fallback)
     remove_file(result_path)
     remove_file(script_path)
     if not picker_ok then error(selected) end
-    selected = normalize_hex(selected, "")
-    if selected ~= "" then
-        set_text(field_id, selected)
-        if save_current_style then save_current_style() end
-    end
+    apply_picked_color(field_id, selected)
 end
 
 
@@ -3692,6 +3896,7 @@ local Ticker = { timer = nil, running = false }
 local Pipeline = { state = nil }
 local Preview = { task = nil, requested = false, countdown = 0, path = nil, serial = 0, frame = { 1920, 1080 } }
 local App = { busy_controls = {}, remove_armed = 0 }
+local Updater = { task = nil, pending = nil, install = nil, updated = nil, result = nil }
 
 function Ticker.ensure()
     if Ticker.timer and not Ticker.running then
@@ -3702,12 +3907,13 @@ end
 
 function Ticker.idle()
     return Pipeline.state == nil and Preview.task == nil and not Preview.requested
-        and Settings.dirty_ticks == nil and App.remove_armed <= 0
+        and Settings.dirty_ticks == nil and App.remove_armed <= 0 and not Updater.busy()
 end
 
 function Ticker.tick()
     Pipeline.tick()
     Preview.tick()
+    Updater.tick()
     if Settings.dirty_ticks then
         Settings.dirty_ticks = Settings.dirty_ticks - 1
         if Settings.dirty_ticks <= 0 then
@@ -3759,6 +3965,9 @@ end
 
 function Pipeline.start()
     if Pipeline.state then error(tr("error.busy")) end
+    -- The installer replaces the engine; after an update this panel still runs the old script.
+    if Updater.install then error(tr("update.installing")) end
+    if Updater.updated then error(tr("update.reopen", { version = Updater.updated })) end
     Pipeline.state = { phase = "scan", started = os.time(), placed = 0, failed = 0, comps = {} }
     set_last_error("")
     App.set_busy(true)
@@ -4099,6 +4308,200 @@ end
 
 
 -- ------------------------------------------------------------------------------------------
+-- Self-update (Windows installs made by the installer)
+--
+-- The engine checks the signed update.json of the latest GitHub Release and downloads the
+-- installer, verifying the Ed25519 signature and the installer's SHA-256 (updater.py). The panel
+-- then runs that installer without a window while nothing else uses the engine, and reads its
+-- result file. The installer keeps settings, presets, logs and outputs.
+
+local UPDATE_CHECK_INTERVAL = 6 * 3600
+local UPDATE_INSTALL_TIMEOUT = 600
+
+function Updater.busy()
+    return Updater.task ~= nil or Updater.pending ~= nil or Updater.install ~= nil
+end
+
+function Updater.read_json(path)
+    local text = read_file(path)
+    if text == "" then return nil end
+    local ok, data = pcall(function() return json_decode(text) end)
+    if ok and type(data) == "table" and data ~= JSON_NULL then return data end
+    return nil
+end
+
+function Updater.installed_version()
+    local data = Updater.read_json(path_join(install_root(), "manifest.json"))
+    if not data or data.product ~= "DavinciTrackVisualizer" or type(data.version) ~= "string" then return nil end
+    return data.version
+end
+
+function Updater.set_status(text)
+    local label = win and win:Find("UpdateStatus") or nil
+    if label then pcall(function() label.Text = text end) end
+end
+
+function Updater.show_version()
+    local version = PLATFORM.windows and Updater.installed_version() or nil
+    local label = win and win:Find("UpdateVersion") or nil
+    if label then
+        pcall(function()
+            label.Text = version and tr("update.version", { version = version }) or tr("update.dev_install")
+        end)
+    end
+    for _, id in ipairs({ "AutoUpdate", "CheckUpdates" }) do
+        local element = win and win:Find(id) or nil
+        if element then pcall(function() element.Enabled = version ~= nil end) end
+    end
+end
+
+function Updater.on_line(line)
+    local percent = line:match("^TVIZ_UPDATE_PROGRESS (%d+)")
+    if percent then
+        Updater.set_status(tr("update.downloading", { percent = percent }))
+        return
+    end
+    local payload = line:match("^TVIZ_UPDATE (.+)$")
+    if payload then
+        local ok, data = pcall(function() return json_decode(payload) end)
+        if ok and type(data) == "table" and data ~= JSON_NULL then Updater.result = data end
+    end
+end
+
+function Updater.check(manual)
+    if Updater.updated then
+        if manual then Updater.set_status(tr("update.installed", { version = Updater.updated })) end
+        return
+    end
+    if Updater.busy() then return end
+    if not PLATFORM.windows or not Updater.installed_version() then
+        if manual then Updater.set_status(tr("update.dev_install")) end
+        return
+    end
+    local engine = engine_path()
+    if not file_exists(engine) then error(tr("error.engine_missing", { path = engine })) end
+    local command = { engine, "update", "--install-root", install_root(), "--download" }
+    if Settings.data.update_source_dir then
+        command[#command + 1] = "--source-dir"
+        command[#command + 1] = Settings.data.update_source_dir
+    end
+    Updater.result = nil
+    Updater.task = queue_runner_task({
+        mode = "run",
+        cwd = install_root(),
+        command = command,
+        stdout_path = path_join(tmp_dir(), "update_stdout.txt"),
+        done_path = path_join(tmp_dir(), "update_done.json"),
+        timeout_seconds = 1800,
+    }, "update")
+    Updater.set_status(tr("update.checking"))
+    Ticker.ensure()
+end
+
+function Updater.auto_check()
+    if Settings.data.auto_update == false then return end
+    if os.time() - (tonumber(Settings.data.update_checked_at) or 0) < UPDATE_CHECK_INTERVAL then return end
+    local ok, err = pcall(function() Updater.check(false) end)
+    if not ok then append_log(tr("update.failed", { details = clean_error(err) })) end
+end
+
+function Updater.start_install()
+    local pending = Updater.pending
+    Updater.pending = nil
+    local installer = tostring(pending.installer or "")
+    if installer == "" or not file_exists(installer) then error("Downloaded installer is missing: " .. installer) end
+    local result_path = path_join(tmp_dir(), "update_result.json")
+    remove_file(result_path)
+    local arguments = {
+        "--no-pause",
+        "--language", active_language,
+        "--install-root", install_root(),
+        "--result-file", result_path,
+    }
+    local state = Updater.read_json(path_join(install_root(), "install-state.json"))
+    if state and type(state.script_directory) == "string" then
+        arguments[#arguments + 1] = "--resolve-script-dir"
+        arguments[#arguments + 1] = state.script_directory
+    end
+    local launched, launch_error = launch_process_native(installer, arguments)
+    if not launched then error(launch_error) end
+    Updater.install = { result_path = result_path, version = tostring(pending.latest), started = os.time(), installer = installer }
+    App.set_busy(true)
+    Updater.set_status(tr("update.installing"))
+    set_progress(nil, tr("update.installing"))
+    append_log(tr("update.installing_version", { version = tostring(pending.latest) }))
+end
+
+function Updater.finish_install(succeeded, details)
+    local install = Updater.install or {}
+    Updater.install = nil
+    App.set_busy(false)
+    if succeeded then
+        -- A failed install keeps the verified download for the next attempt.
+        if install.installer then remove_file(install.installer) end
+        Updater.updated = tostring(install.version or "")
+        local notice = tr("update.installed", { version = Updater.updated })
+        Updater.set_status(notice)
+        append_log(notice)
+        set_progress(100, notice)
+    else
+        local message = tr("update.failed", { details = details or "" })
+        Updater.set_status(message)
+        append_log(message)
+        set_progress(0, message)
+    end
+    Updater.show_version()
+end
+
+function Updater.tick()
+    if Updater.task then
+        local ok, done = pcall(function() return poll_runner_task(Updater.task, Updater.on_line) end)
+        if not ok then
+            Updater.task = nil
+            local details = clean_error(done)
+            append_log(tr("update.failed", { details = details }))
+            Updater.set_status(tr("update.failed", { details = short_text(details, 160) }))
+            return
+        end
+        if not done then return end
+        Updater.task = nil
+        Settings.data.update_checked_at = os.time()
+        Settings.mark_dirty()
+        local result = Updater.result or {}
+        if result.status == "ready" then
+            Updater.pending = result
+            Updater.set_status(tr("update.ready", { version = tostring(result.latest) }))
+        elseif result.status == "up_to_date" then
+            Updater.set_status(tr("update.up_to_date", { version = tostring(result.current) }))
+        else
+            Updater.set_status(tr("update.dev_install"))
+        end
+        return
+    end
+    if Updater.pending then
+        -- The installer stops the engine, so wait until no run or preview is using it.
+        if Pipeline.state or Preview.task then return end
+        local ok, err = pcall(Updater.start_install)
+        if not ok then Updater.finish_install(false, clean_error(err)) end
+        return
+    end
+    local install = Updater.install
+    if install then
+        local result = Updater.read_json(install.result_path)
+        if not result then
+            if os.time() - install.started > UPDATE_INSTALL_TIMEOUT then
+                Updater.finish_install(false, tr("update.install_timeout"))
+            end
+            return
+        end
+        remove_file(install.result_path)
+        if type(result.version) == "string" then install.version = result.version end
+        Updater.finish_install(result.ok == true, type(result.error) == "string" and result.error or nil)
+    end
+end
+
+
+-- ------------------------------------------------------------------------------------------
 -- Style editor: settings <-> controls
 
 local Editor = { suppress = false }
@@ -4124,6 +4527,7 @@ Editor.toggles = {
     { id = "ShowBars", key = "show_bars", feature = "bars", label = "field.bars", exclude = "progress_style" },
     { id = "GlassEnabled", key = "glass_enabled", feature = "glass", label = "field.glass" },
     { id = "UppercaseArtist", key = "uppercase_artist", feature = "artist", label = "field.uppercase_artist" },
+    { id = "ScrollTitle", key = "scroll_title", feature = "title", label = "field.scroll_title" },
 }
 
 Editor.numbers = {
@@ -4581,7 +4985,16 @@ function HANDLERS.pick_color_safely(field_id, fallback)
         set_progress(0, notice)
         return
     end
-    local ok, err = pcall(function() pick_windows_color(field_id, fallback) end)
+    local swatches = {}
+    local design = Settings.data.styles[Settings.data.active_skin] or {}
+    for _, color in ipairs(Editor.colors) do
+        local value = normalize_hex(design[color.key], "")
+        if value ~= "" then
+            local r, g, b = hex_to_rgb(value)
+            swatches[#swatches + 1] = { r, g, b }
+        end
+    end
+    local ok, err = pcall(function() pick_windows_color(field_id, fallback, swatches) end)
     if not ok then
         report_error(err)
         local notice = tr("notice.color_manual")
@@ -4985,6 +5398,15 @@ function App.build_service_page(fonts)
         }),
         App.hint(tr("language.restart_hint"), fonts, "LanguageRestartHint"),
         ui:VGap(6, 0),
+        App.section(tr("section.updates"), fonts),
+        ui:HGroup({ Weight = 0, Spacing = 12 }, {
+            ui:Label({ ID = "UpdateVersion", Text = "", Weight = 0 }),
+            ui:CheckBox({ ID = "AutoUpdate", Text = tr("field.auto_update"), Weight = 0 }),
+            ui:HGap(0, 1),
+            ui:Button({ ID = "CheckUpdates", Text = tr("action.check_updates"), Weight = 0 }),
+        }),
+        ui:Label({ ID = "UpdateStatus", Text = "", Weight = 0, WordWrap = true, StyleSheet = App.widget_styles.muted }),
+        ui:VGap(6, 0),
         ui:HGroup({ Weight = 0, Spacing = 8 }, {
             App.section(tr("diagnostics.title"), fonts),
             ui:HGap(0, 1),
@@ -5146,6 +5568,15 @@ function App.bind_events()
     win.On.ClearLog.Clicked = function(ev) HANDLERS.on_clear_log() end
     win.On.CleanupLegacy.Clicked = function(ev) HANDLERS.on_cleanup_legacy() end
     win.On.LanguageMode.CurrentIndexChanged = function(ev) HANDLERS.on_language_changed() end
+    win.On.AutoUpdate.Clicked = function(ev)
+        local enabled = check_field("AutoUpdate", true)
+        if Settings.data.auto_update == enabled then return end
+        Settings.data.auto_update = enabled
+        Settings.mark_dirty()
+    end
+    win.On.CheckUpdates.Clicked = function(ev)
+        HANDLERS.guard(function() Updater.check(true) end)
+    end
     for _, suffix in ipairs({ "Create", "Style" }) do
         win.On["Preview" .. suffix].Clicked = function(ev) HANDLERS.on_open_preview() end
     end
@@ -5226,6 +5657,8 @@ function App.populate()
     App.show_style_page(0)
     Log.refresh_widget()
     App.set_busy(false)
+    set_checked("AutoUpdate", Settings.data.auto_update ~= false)
+    Updater.show_version()
 end
 
 function App.run()
@@ -5270,6 +5703,7 @@ function App.run()
     end)
     Preview.request(0)
     set_progress(0, tr("status.ready"))
+    Updater.auto_check()
     -- Resolve can deliver an event left over from a previously closed window; its dispatcher then
     -- fails to look the sender up and throws out of RunLoop. Resume the loop instead of dying.
     App.closing = false

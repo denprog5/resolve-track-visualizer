@@ -83,6 +83,7 @@ MESSAGE_CATALOGS = {
         ),
         "help_no_pause": "Never wait for input before exiting",
         "help_resolve_script_dir": "Override the Resolve Utility scripts directory",
+        "help_result_file": "Write the outcome as JSON to this file (used by self-update)",
         "help_uninstall": "Uninstall instead of install",
         "install_application_directory": "Application directory: {path}",
         "install_complete": "Installation complete.",
@@ -134,6 +135,7 @@ MESSAGE_CATALOGS = {
         ),
         "help_no_pause": "Никогда не ожидать ввода перед выходом",
         "help_resolve_script_dir": "Изменить каталог скриптов Resolve Utility",
+        "help_result_file": "Записать результат в этот файл в формате JSON (для автообновления)",
         "help_uninstall": "Удалить программу вместо установки",
         "install_application_directory": "Каталог приложения: {path}",
         "install_complete": "Установка завершена.",
@@ -3692,6 +3694,11 @@ def build_parser(language: str = DEFAULT_LANGUAGE) -> argparse.ArgumentParser:
         action="store_true",
         help=message("help_no_pause", language),
     )
+    parser.add_argument(
+        "--result-file",
+        type=Path,
+        help=message("help_result_file", language),
+    )
     return parser
 
 
@@ -3713,12 +3720,46 @@ def _pause_if_needed(no_pause: bool, language: str = DEFAULT_LANGUAGE) -> None:
     input(message("pause_prompt", language))
 
 
+def write_result_file(path: Path | None, *, ok: bool, version: str | None, error: str | None) -> None:
+    """Atomically record the outcome for a caller that cannot read the console (self-update)."""
+    if path is None:
+        return
+    payload = {"ok": ok, "version": version, "error": error}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        pass
+
+
+def _payload_version(source_dir: Path) -> str | None:
+    try:
+        data = json.loads((source_dir / MANIFEST_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    version = data.get("version") if isinstance(data, dict) else None
+    return version if isinstance(version, str) else None
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_unicode_console()
     command_line = list(sys.argv[1:] if argv is None else argv)
     language = resolve_language(_language_from_argv(command_line))
     args = build_parser(language).parse_args(command_line)
     language = resolve_language(args.language)
+    version = _payload_version(resource_root())
+    try:
+        exit_code = _run(args, language)
+    except Exception as exc:
+        write_result_file(args.result_file, ok=False, version=version, error=str(exc))
+        raise
+    write_result_file(args.result_file, ok=exit_code == 0, version=version, error=None)
+    return exit_code
+
+
+def _run(args: argparse.Namespace, language: str) -> int:
     source_dir = resource_root()
     target_root = _absolute_path(args.install_root or default_install_root())
     script_dir = _absolute_path(args.resolve_script_dir or default_resolve_scripts_dir())

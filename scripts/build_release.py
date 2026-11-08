@@ -728,7 +728,7 @@ def stage_package(
     source_record += f"SHA-256: {ffmpeg_source_sha256 or 'not recorded'}\n"
     source_offer.write_text(
         source_record
-        + "The assembled private Actions artifact includes the byte-identical FFmpeg source archive under source/.\n"
+        + "The assembled release bundle includes the byte-identical FFmpeg source archive under source/; the GitHub Release of this version attaches it as an asset.\n"
         + "The complete build recipe is included as licenses/FFMPEG_BUILD_SCRIPT.sh and in the project source.\n"
         + "No patches or external libraries are used. FFmpeg libraries are linked statically; operating-system "
         + "runtime libraries remain platform dependencies.\n",
@@ -743,7 +743,7 @@ def stage_package(
         f"Version: {MUTAGEN_VERSION}\n"
         f"Official PyPI source URL: {MUTAGEN_SOURCE_URL}\n"
         f"SHA-256: {MUTAGEN_SOURCE_SHA256}\n"
-        "The assembled private Actions artifact includes this byte-identical source archive under source/.\n",
+        "The assembled release bundle includes this byte-identical source archive under source/; the GitHub Release of this version attaches it as an asset.\n",
         encoding="utf-8",
         newline="\n",
     )

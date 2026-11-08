@@ -9,7 +9,7 @@ Mutagen is distributed under GPL-2.0-or-later. Its source and license are
 available from the exact Mutagen 1.47.0 source archive used for this release:
 https://files.pythonhosted.org/packages/81/e6/64bc71b74eef4b68e61eb921dcf72dabd9e4ec4af1e11891bbd312ccbb77/mutagen-1.47.0.tar.gz
 SHA-256: 719fadef0a978c31b4cf3c956261b3c58b6948b32023078a2117b1de09f0fc99
-The archive is included under source/ in the assembled private Actions artifact
+The archive is included under source/ in the assembled release bundle
 and recorded inside each package under licenses/MUTAGEN_SOURCE_OFFER.txt.
 
 Pillow 12.2.0 and bundled native libraries
@@ -36,14 +36,14 @@ The Windows CPython 3.12.10 runtime bundles libffi 3.4.4 for _ctypes under its
 MIT license. Its exact LICENSE payload is included as
 licenses/libffi-LICENSE.txt. The corresponding python/cpython-source-deps tag
 archive identified by the official Python installer SBOM is included under
-source/ in the assembled private Windows Actions artifact:
+source/ in the assembled Windows release bundle and on its GitHub Release:
 https://github.com/python/cpython-source-deps/archive/refs/tags/libffi-3.4.4.tar.gz
 SHA-256: 9d802681adfea27d84cae0487a785fb9caa925bdad44c401b364c59ab2b8edda
 
 The Linux CPython _ctypes extension statically links the unmodified libffi
 3.4.8 release. Its exact license is also staged as
 licenses/libffi-LICENSE.txt, and its byte-identical source archive is included
-under source/ in the assembled private Linux canary Actions artifact:
+under source/ in the assembled private Linux canary bundle:
 https://github.com/libffi/libffi/releases/download/v3.4.8/libffi-3.4.8.tar.gz
 SHA-256: bc9842a18898bfacb0ed1252c4febcc7e78fa139fd27fdc7a3e30d9d9356119b
 
@@ -53,7 +53,7 @@ The Windows CPython 3.12.10 runtime bundles OpenSSL 3.0.16 for _ssl and
 _hashlib under the Apache License 2.0. The exact LICENSE.txt payload is included
 as licenses/OpenSSL-LICENSE.txt. The corresponding python/cpython-source-deps
 tag archive identified by the official Python installer SBOM is included under
-source/ in the assembled private Windows Actions artifact:
+source/ in the assembled Windows release bundle and on its GitHub Release:
 https://github.com/python/cpython-source-deps/archive/refs/tags/openssl-3.0.16.tar.gz
 SHA-256: 6bb739ecddbd2cfb6d255eb5898437a9b5739277dee931338d3275bac5d96ba2
 
@@ -81,6 +81,6 @@ https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz
 SHA-256:
 cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635
 
-The exact official archive is included under source/ in the assembled private
-Actions artifact. The package includes the applicable license, complete
+The exact official archive is included under source/ in the assembled
+release bundle. The package includes the applicable license, complete
 build/license output, source record, and exact build recipe under licenses/.

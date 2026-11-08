@@ -561,34 +561,60 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("sha256sum -c SHA256SUMS", self.readme)
         self.assertIn("`artifacts/`, `source/`, and a root `SHA256SUMS`", self.readme)
 
-    def test_unsigned_artifacts_are_private_short_lived_and_never_published(self) -> None:
-        forbidden = (
-            "contents: write",
-            "id-token: write",
-            "attestations: write",
-            "actions/attest@",
-            "softprops/action-gh-release@",
-            "actions/create-release@",
-            "gh release",
-            "tags:",
-        )
-        for value in forbidden:
+    def test_only_the_release_publish_job_publishes_and_the_canary_stays_private(self) -> None:
+        never = ("id-token: write", "attestations: write", "actions/attest@", "softprops/action-gh-release@", "actions/create-release@", "tags:")
+        for value in never:
             self.assertNotIn(value, self.all_workflows)
+        for name, workflow in self.workflows.items():
+            if name != "release.yml":
+                self.assertNotIn("contents: write", workflow, name)
+                self.assertNotIn("gh release", workflow, name)
+        publish = workflow_job(self.release_workflow, "publish")
+        build = workflow_job(self.release_workflow, "build")
+        self.assertNotIn("contents: write", build)
+        self.assertNotIn("gh release", build)
+        self.assertEqual(self.release_workflow.count("contents: write"), 1)
+        for fragment in (
+            "needs: build",
+            "if: ${{ inputs.publish }}",
+            "contents: write",
+            "name: resolve-track-visualizer-${{ inputs.version }}-release-candidate-windows-x64",
+            "sha256sum -c SHA256SUMS",
+            "TVIZ_UPDATE_SIGNING_KEY: ${{ secrets.TVIZ_UPDATE_SIGNING_KEY }}",
+            "python scripts/make_update_manifest.py",
+            "--out release-bundle/artifacts/update.json",
+            "python scripts/release_notes.py",
+            'gh release create "v${VERSION}"',
+            '--target "$GITHUB_SHA"',
+            "release-bundle/source/*",
+        ):
+            self.assertIn(fragment, publish)
+        self.assertLess(publish.index("sha256sum -c SHA256SUMS"), publish.index("make_update_manifest.py"))
+        self.assertLess(publish.index("make_update_manifest.py"), publish.index("gh release create"))
+        self.assertIn("default: false", self.release_workflow)
+        self.assertIn("persist-credentials: false", publish)
 
         uploads = self.workflow.count("uses: actions/upload-artifact@")
         self.assertEqual(uploads, 4)
         self.assertEqual(re.findall(r"retention-days:\s*(\d+)", self.workflow), ["1"] * uploads)
         self.assertIn('REPOSITORY_VISIBILITY: ${{ github.repository_visibility }}', self.workflow)
-        self.assertIn('os.environ["REPOSITORY_VISIBILITY"] != "private"', self.workflow)
-        self.assertIn("Unsigned artifacts may be built only in a private repository", self.workflow)
+        self.assertIn(
+            'if os.environ["REPOSITORY_VISIBILITY"] != "private" and os.environ["CHANNEL"] != "release-candidate":',
+            self.workflow,
+        )
+        self.assertIn("Unpublished canary artifacts may be built only in a private repository", self.workflow)
         self.assertLess(
-            self.workflow.index("name: Validate private build request"),
+            self.workflow.index("name: Validate build request"),
             self.workflow.index("uses: actions/upload-artifact@"),
         )
         self.assertEqual(
-            self.workflow.count('repository.get("visibility") != "private"'),
+            self.workflow.count(
+                'allowed = {"private", "public"} if os.environ["CHANNEL"] == "release-candidate" else {"private"}'
+            ),
             uploads,
         )
+        self.assertEqual(self.workflow.count('if repository.get("visibility") not in allowed:'), uploads)
+        self.assertEqual(self.workflow.count("CHANNEL: ${{ inputs.channel }}"), uploads + 1)
         self.assertEqual(self.workflow.count('"Authorization": f"Bearer'), uploads)
         self.assertEqual(self.workflow.count('"Accept": "application/vnd.github+json"'), uploads)
         self.assertEqual(self.workflow.count('"X-GitHub-Api-Version": "2022-11-28"'), uploads)
@@ -623,7 +649,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
 
     def test_release_docs_cover_retention_visibility_cleanup_and_macos_scope(self) -> None:
-        self.assertIn("Artifacts have one-day retention", self.readme)
+        self.assertIn("Workflow artifacts have one-day retention", self.readme)
         self.assertIn("delete all retained native artifacts and their workflow runs", self.readme)
         self.assertIn("macOS is unsupported, unbuilt", self.readme)
         self.assertIn("one-day retention", self.releasing_docs)
@@ -665,7 +691,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             self.releasing_docs,
         )
         for text in texts:
-            self.assertIn("assembled private", text)
+            self.assertRegex(text, r"assembled (Windows )?release bundle")
             self.assertNotRegex(text.lower(), r"publish\w*[^.\n]*beside")
         self.assertNotIn("Each target verifies its inputs again", self.releasing_docs)
         self.assertIn("The build job re-verifies archives before extracting them", self.releasing_docs)

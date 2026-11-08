@@ -16,16 +16,19 @@ Resolve Track Visualizer creates music player overlays for the audio clips of a 
 - Trims on either side are respected: the time readout and progress start from the clip's source offset, and progress can show the position in the whole track or in the clip.
 - Non-blocking panel: look, timeline and a large preview on one page; fine-tuning on **Look**, presets and palettes in **Library**, log and language in **Service**.
 - MP3, WAV, FLAC, M4A, AAC and OGG metadata and embedded artwork; waveform analysis with loudness-aware scaling.
+- Long track titles that do not fit their line scroll so the whole title can be read (can be turned off per skin).
+- Signed automatic updates: installed copies update themselves from GitHub Releases.
 - Russian and English UI.
-- Private Windows x64 release-candidate builds and a separate manual Linux x64 packaging canary.
 
 ## Status
 
-Version `0.1.0` is a preview. It has been verified only with **DaVinci Resolve Studio 20.2.1 on Windows x64**. Resolve 21 testing is deferred. The current UIManager interface requires Resolve Studio, so Resolve Free is not supported. Resolve 19 or older, Resolve 21, and Linux Resolve hosts have not been certified. See the [compatibility matrix](docs/compatibility.md).
+Version `0.9.0` is a preview on the way to 1.0. It has been verified only with **DaVinci Resolve Studio 20.2.1 on Windows x64**. Resolve 21 testing is deferred. The current UIManager interface requires Resolve Studio, so Resolve Free is not supported. Resolve 19 or older, Resolve 21, and Linux Resolve hosts have not been certified. See the [compatibility matrix](docs/compatibility.md).
 
-Windows x64 is the only release-candidate target. Linux x64 is an independently triggered, unpublished canary build and is not part of release-candidate publication. macOS is unsupported, unbuilt, and outside the current release scope. These are packaging targets, not additional Resolve compatibility claims; see [Release process](docs/releasing.md).
+Windows x64 is the only released target. Linux x64 is an independently triggered, unpublished canary build and is never published. macOS is unsupported, unbuilt, and outside the current release scope. These are packaging targets, not additional Resolve compatibility claims; see [Release process](docs/releasing.md).
 
-Native artifacts are **not code-signed**. Immediately before every upload, the workflow re-queries repository visibility through the GitHub API and fails unless it is private. Artifacts have one-day retention, and no workflow creates or publishes a GitHub Release. Before changing repository visibility, maintainers must delete all retained native artifacts and their workflow runs because a workflow cannot protect data retained after the run finishes. The assembled private artifact extracts to `artifacts/`, `source/`, and a root `SHA256SUMS`. From that extracted root, verify every relative path before running anything:
+Releases are published on the [Releases page](https://github.com/denprog5/resolve-track-visualizer/releases). The Windows executables are **not Authenticode-signed yet** (free open-source signing through the SignPath Foundation is being requested, see the [code signing policy](docs/code-signing-policy.md)), so Windows SmartScreen may show "Windows protected your PC" on first launch: choose **More info → Run anyway**. Automatic updates do not depend on Authenticode; they are verified with the project's own Ed25519 signature.
+
+Workflow artifacts have one-day retention; only a maintainer-requested release run publishes anything. Before changing repository visibility from private, maintainers must delete all retained native artifacts and their workflow runs because a workflow cannot protect data retained after the run finishes. Each release attaches `SHA256SUMS`, and the assembled build artifact extracts to `artifacts/`, `source/`, and a root `SHA256SUMS`. From that extracted root, verify every relative path before running anything:
 
 ```bash
 sha256sum -c SHA256SUMS
@@ -39,7 +42,7 @@ The language can be changed on the **Service** tab under **Language**. Close and
 
 ## Install And Run
 
-The currently verified installation flow uses `TrackVisualizerSetup-0.1.0-windows-x64.exe`. It installs the engine under `%LOCALAPPDATA%\DavinciTrackVisualizer\` and the Resolve menu script under:
+Download `TrackVisualizerSetup-<version>-windows-x64.exe` from the latest release and run it. It installs the engine under `%LOCALAPPDATA%\DavinciTrackVisualizer\` and the Resolve menu script under:
 
 ```text
 %APPDATA%\Blackmagic Design\DaVinci Resolve\Support\Fusion\Scripts\Utility\Track Visualizer.lua
@@ -51,21 +54,33 @@ Restart Resolve, then open:
 Workspace -> Scripts -> Utility -> Track Visualizer
 ```
 
-The Windows release-candidate workflow produces:
+Each Windows release contains:
 
 | Target | Artifact | Application data |
 | --- | --- | --- |
-| Windows x64 | `.exe` and `.zip` | `%LOCALAPPDATA%\DavinciTrackVisualizer` |
+| Windows x64 | `.exe` installer, portable `.zip`, SBOM, signed `update.json` | `%LOCALAPPDATA%\DavinciTrackVisualizer` |
 
 The separate manual Linux x64 canary produces an executable in a `.tar.gz` and uses `$XDG_DATA_HOME/DavinciTrackVisualizer` or `~/.local/share/DavinciTrackVisualizer`. It requires glibc 2.28 or later, remains unpublished, and is not a release candidate. Both native builds receive package smoke tests, but Resolve integration is verified only on Windows x64.
 
 The same setup executable supports a non-destructive uninstall:
 
 ```powershell
-.\TrackVisualizerSetup-0.1.0-windows-x64.exe --uninstall --no-pause
+.\TrackVisualizerSetup-0.9.0-windows-x64.exe --uninstall --no-pause
 ```
 
 Uninstall removes only managed runtime files and the Resolve menu script. User settings, logs, tasks, temporary work, rendered outputs, and unknown files are preserved so they can be recovered or removed manually.
+
+## Updates
+
+You only need to run the installer once. After that Track Visualizer keeps itself up to date:
+
+- When the panel opens (at most every six hours) it checks the latest GitHub Release in the background, downloads the new installer, and verifies the release signature, size and SHA-256.
+- When no players are being created, it installs the update silently and keeps your settings, presets and palettes. Close and reopen the panel to use the new version.
+- **Service → Updates** shows the installed version, has **Check for updates**, and lets you turn automatic updates off.
+
+Installs older than 0.9.0 cannot update themselves; run the 0.9.0 installer once by hand.
+
+## Workflow
 
 Basic workflow:
 
@@ -95,7 +110,7 @@ Parse the Resolve Lua script without executing it:
 .\.venv\Scripts\python -c "from pathlib import Path; from luaparser import ast; ast.parse(Path(r'resolve_scripts/Track Visualizer.lua').read_text(encoding='utf-8'))"
 ```
 
-The supported reproducible release path is the manually dispatched GitHub Actions workflow in the private repository. A direct `scripts/build_release.py` invocation is an advanced equivalent: it requires exactly Python 3.12.10 on Windows or 3.12.13 on Linux, a verified matching FFmpeg/FFprobe pair, and explicit `--ffmpeg-license`, `--ffmpeg-version`, `--ffmpeg-source-url`, and `--ffmpeg-source-sha256` values. Finding FFmpeg on `PATH` alone is insufficient. On Windows, also pass verified files through `--windows-libffi-license` and `--windows-openssl-license`; the script also enforces Python user-site isolation.
+The supported reproducible release path is the manually dispatched GitHub Actions workflow; see [Release process](docs/releasing.md). A direct `scripts/build_release.py` invocation is an advanced equivalent: it requires exactly Python 3.12.10 on Windows or 3.12.13 on Linux, a verified matching FFmpeg/FFprobe pair, and explicit `--ffmpeg-license`, `--ffmpeg-version`, `--ffmpeg-source-url`, and `--ffmpeg-source-sha256` values. Finding FFmpeg on `PATH` alone is insufficient. On Windows, also pass verified files through `--windows-libffi-license` and `--windows-openssl-license`; the script also enforces Python user-site isolation.
 
 Native Actions builds do not trust runner-provided FFmpeg binaries. They build a minimal pinned FFmpeg 9.0.1 from its verified official source archive. Windows packaging also downloads the official Python 3.12.10 x64 installer, verifies its exact digest and Python Software Foundation Authenticode signer, and installs it into runner-temporary storage instead of using the hosted toolcache. The Windows release candidate and Linux canary are separate manual runs. Pull requests and pushes to `main` run tests and Lua parsing on Windows and Linux without compiling FFmpeg or running PyInstaller.
 
@@ -107,6 +122,7 @@ Native Actions builds do not trust runner-provided FFmpeg binaries. They build a
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 - [Release process](docs/releasing.md)
 - [Compatibility](docs/compatibility.md)
+- [Code signing policy](docs/code-signing-policy.md)
 
 Copyright (C) 2026 denprog5. Licensed under the [GNU General Public License, version 3 or later](LICENSE), SPDX identifier `GPL-3.0-or-later`.
 

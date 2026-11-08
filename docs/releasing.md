@@ -1,19 +1,53 @@
 # Release Process
 
-Native artifacts are unsigned internal validation builds. The workflows do not create or update Git tags, GitHub Releases, release drafts, attestations, or any other public distribution channel.
+Windows x64 builds are published as GitHub Releases by one manual workflow. Every release carries a signed `update.json` manifest that installed copies use to update themselves. The Linux x64 canary stays an unpublished internal build. No workflow has a tag trigger; the only tag is the one `gh release create` makes for a release a maintainer explicitly requested.
 
 ## Triggers And Publication Policy
 
-- `.github/workflows/release.yml` is manual-only and requests the Windows x64 release-candidate build.
-- `.github/workflows/linux-canary.yml` is a separate manual-only Linux x64 canary build. It is not a release candidate and is never included in Windows release-candidate artifacts.
-- `.github/workflows/native-build.yml` is reusable only through `workflow_call` and accepts exactly `windows-x64`/`release-candidate` or `linux-x64`/`canary`.
-- No native workflow has a tag trigger or write permission. Unsigned output is stored only as GitHub Actions artifacts with one-day retention.
+- `.github/workflows/release.yml` is manual-only. Its `build` job requests the Windows x64 release-candidate build. Its `publish` job runs only when the `publish` input is checked (default: off) and is the only job in any workflow with `contents: write`.
+- `.github/workflows/linux-canary.yml` is a separate manual-only Linux x64 canary build. It is not a release candidate, is never included in Windows release artifacts, and is never published.
+- `.github/workflows/native-build.yml` is reusable only through `workflow_call` and accepts exactly `windows-x64`/`release-candidate` or `linux-x64`/`canary`. It has no write permission to repository contents.
+- Workflow artifacts have one-day retention; the GitHub Release is the durable copy.
 
-The reusable workflow validates the target/channel and requested version before building. Immediately before every artifact upload, it queries `GET /repos/{owner}/{repo}` with the read-only workflow token and fails unless the live `visibility` response is exactly `private`. An API failure, missing field, `public`, or `internal` response fails closed.
+The reusable workflow validates the target/channel and requested version before building. Immediately before every artifact upload, it queries `GET /repos/{owner}/{repo}` with the read-only workflow token. The Windows release candidate accepts a live `visibility` of `private` or `public`; the Linux canary fails unless it is exactly `private`. An API failure, missing field, or `internal` response fails closed.
 
-Creating a public release remains disabled until an approved signing and publication process is implemented. A maintainer must not manually republish these unsigned workflow artifacts.
+Before changing repository visibility from private to public, maintainers must delete every retained native artifact and the workflow runs that produced them. The live pre-upload gate can prevent new exposure, but no workflow can protect artifacts or logs retained after a completed run if repository visibility later changes.
 
-Before changing repository visibility, maintainers must delete every retained native artifact and the workflow runs that produced them. The live pre-upload gate can prevent new exposure, but no workflow can protect artifacts or logs retained after a completed run if repository visibility later changes.
+## Publishing A Release
+
+1. Bump `davinci_track_visualizer.__version__` and add a `## [<version>] - <date>` section to `CHANGELOG.md`. The publish job fails when that section is missing or empty, because its body becomes the release notes.
+2. Push to `main` and wait for CI.
+3. Run **Windows release** (`release.yml`) with the version and **publish** checked:
+
+   ```bash
+   gh workflow run release.yml -f version=0.9.0 -f publish=true
+   ```
+
+The publish job downloads the assembled release bundle, verifies `SHA256SUMS`, writes `artifacts/update.json` with `scripts/make_update_manifest.py`, extracts the notes with `scripts/release_notes.py`, and creates the `v<version>` release at the built commit. It attaches the installer, portable `.zip`, SBOM, `update.json`, the corresponding source archives, and `SHA256SUMS`. A version with a pre-release suffix such as `1.0.0-rc.1` becomes a GitHub pre-release; installed copies only follow the release GitHub marks as **Latest**.
+
+Run the workflow with **publish** unchecked to get a short-lived build for testing without releasing it.
+
+## Automatic Updates
+
+The Resolve panel runs `TrackVisualizerEngine update` in the background when it opens, at most every six hours, and from **Service → Updates → Check for updates**. The engine:
+
+1. downloads `https://github.com/denprog5/resolve-track-visualizer/releases/latest/download/update.json` over HTTPS, following redirects only to GitHub hosts;
+2. verifies its Ed25519 signature against the public key embedded in `davinci_track_visualizer/updater.py`, then checks the product, platform, schema, version, installer name and URL;
+3. downloads the installer into `<install root>/updates/` and checks its exact size and SHA-256 before keeping it.
+
+The panel then runs the installer silently with `--no-pause --result-file`, but only while no player run or preview is in progress, and asks the user to reopen the panel. A failed update keeps the installed version. Users can turn automatic updates off in **Service → Updates**. Copies installed before 0.9.0 have no updater and must run the 0.9.0 installer once by hand.
+
+### Update signing key
+
+`update.json` is signed with an Ed25519 private key stored only in the `TVIZ_UPDATE_SIGNING_KEY` Actions secret (64 hex characters) and in an offline backup kept by the maintainer. The matching public key is `PUBLIC_KEY_HEX` in `davinci_track_visualizer/updater.py`; `make_update_manifest.py` refuses to publish a manifest that the embedded key does not verify.
+
+- Never commit the private key or print it in a workflow log.
+- To rotate it, generate a new key pair, ship a release whose updater embeds the new public key while still signing with the old key, then switch the secret to the new key for later releases.
+- If the key is lost, installed copies cannot verify new releases; users must install the next release by hand.
+
+## Code Signing
+
+The Windows executables are not Authenticode-signed yet, so Windows SmartScreen may warn on first launch. The project is applying for free code signing for open-source projects through the SignPath Foundation; see [code signing policy](code-signing-policy.md). The update manifest signature above protects automatic updates independently of Authenticode.
 
 ## Native Targets
 
@@ -44,7 +78,7 @@ The build uses the unmodified official FFmpeg 9.0.1 source archive:
 - SHA-256: `cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635`
 - Build recipe: `packaging/scripts/build_ffmpeg.sh`
 
-The prepare job downloads and verifies the FFmpeg source plus exact corresponding source archives for Mutagen and the target's CPython runtime, then rejects any unexpected source file before internal transfer. The build job re-verifies archives before extracting them: FFmpeg on both targets, the bundled libffi/OpenSSL sources on Windows, and CPython/libffi on Linux when rebuilding the cached runtime. Mutagen and Windows CPython source archives are corresponding-source payloads rather than build inputs, so their exact prepare-job verification and artifact transfer integrity are retained without a redundant build-job extraction. Windows receives `Python-3.12.10.tar.xz` with SHA-256 `07ab697474595e06f06647417d3c7fa97ded07afc1a7e4454c5639919b46eaea`. It also receives the `python/cpython-source-deps` libffi 3.4.4 tag archive from `https://github.com/python/cpython-source-deps/archive/refs/tags/libffi-3.4.4.tar.gz` with SHA-256 `9d802681adfea27d84cae0487a785fb9caa925bdad44c401b364c59ab2b8edda`, and the OpenSSL 3.0.16 tag archive from `https://github.com/python/cpython-source-deps/archive/refs/tags/openssl-3.0.16.tar.gz` with SHA-256 `6bb739ecddbd2cfb6d255eb5898437a9b5739277dee931338d3275bac5d96ba2`; these versions and sources correspond to the official Python 3.12.10 installer SBOM. Their required archive roots are `cpython-source-deps-libffi-3.4.4` and `cpython-source-deps-openssl-3.0.16`. Before staging, the extracted libffi `LICENSE` and OpenSSL `LICENSE.txt` must match SHA-256 `2c9c2acb9743e6b007b91350475308aee44691d96aa20eacef8e199988c8c388` and `7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a`, respectively. Linux receives CPython 3.12.13 and libffi 3.4.8 source. These sources are included under `source/` in the assembled private Actions artifact; no source or binary artifact is publicly published.
+The prepare job downloads and verifies the FFmpeg source plus exact corresponding source archives for Mutagen and the target's CPython runtime, then rejects any unexpected source file before internal transfer. The build job re-verifies archives before extracting them: FFmpeg on both targets, the bundled libffi/OpenSSL sources on Windows, and CPython/libffi on Linux when rebuilding the cached runtime. Mutagen and Windows CPython source archives are corresponding-source payloads rather than build inputs, so their exact prepare-job verification and artifact transfer integrity are retained without a redundant build-job extraction. Windows receives `Python-3.12.10.tar.xz` with SHA-256 `07ab697474595e06f06647417d3c7fa97ded07afc1a7e4454c5639919b46eaea`. It also receives the `python/cpython-source-deps` libffi 3.4.4 tag archive from `https://github.com/python/cpython-source-deps/archive/refs/tags/libffi-3.4.4.tar.gz` with SHA-256 `9d802681adfea27d84cae0487a785fb9caa925bdad44c401b364c59ab2b8edda`, and the OpenSSL 3.0.16 tag archive from `https://github.com/python/cpython-source-deps/archive/refs/tags/openssl-3.0.16.tar.gz` with SHA-256 `6bb739ecddbd2cfb6d255eb5898437a9b5739277dee931338d3275bac5d96ba2`; these versions and sources correspond to the official Python 3.12.10 installer SBOM. Their required archive roots are `cpython-source-deps-libffi-3.4.4` and `cpython-source-deps-openssl-3.0.16`. Before staging, the extracted libffi `LICENSE` and OpenSSL `LICENSE.txt` must match SHA-256 `2c9c2acb9743e6b007b91350475308aee44691d96aa20eacef8e199988c8c388` and `7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a`, respectively. Linux receives CPython 3.12.13 and libffi 3.4.8 source. These sources are included under `source/` in the assembled release bundle, and the Windows GitHub Release attaches them as assets.
 
 The recipe enables GPL and version-3 terms and builds the FFmpeg libraries statically into `ffmpeg` and `ffprobe`. It starts with `--disable-everything` and enables only the codecs, formats, filters, and local `file`/`pipe` protocols needed by the application. Shared libraries, autodetected optional libraries, network protocols, `ffplay`, x86 assembly dependencies, PNG, and zlib are disabled. Windows uses static linker flags so MinGW runtime DLLs are not redistributed; operating-system runtime libraries such as the Universal CRT and Linux libc remain dynamic platform dependencies.
 
@@ -58,14 +92,15 @@ Only unsigned dependency build prefixes are cached. Cache keys include source ve
 
 The builder derives the product version from `davinci_track_visualizer.__version__`, detects the native host and architecture, and rejects unsupported or non-64-bit hosts. The workflow uses a run-specific output directory under `build/` and validates the exact target-specific artifact set after SBOM generation.
 
-Windows output consists of the portable `.zip`, native `.exe` installer, and SPDX JSON SBOM. Linux canary output consists of the portable `.tar.gz`, native installer, mode-preserving installer `.tar.gz`, and SPDX JSON SBOM. The executable-bearing cross-job artifact is explicitly named as an internal transfer and contains `INTERNAL_SHA256SUMS`; assembly verifies that manifest covers its exact relative file set before copying files. The final private artifact contains one extracted-root layout: `artifacts/` for target outputs, `source/` for corresponding sources, and `SHA256SUMS` at the root. Final checksum records use paths relative to that root and are verified before upload.
+Windows output consists of the portable `.zip`, native `.exe` installer, and SPDX JSON SBOM. Linux canary output consists of the portable `.tar.gz`, native installer, mode-preserving installer `.tar.gz`, and SPDX JSON SBOM. The executable-bearing cross-job artifact is explicitly named as an internal transfer and contains `INTERNAL_SHA256SUMS`; assembly verifies that manifest covers its exact relative file set before copying files. The final assembled artifact contains one extracted-root layout: `artifacts/` for target outputs, `source/` for corresponding sources, and `SHA256SUMS` at the root. Final checksum records use paths relative to that root and are verified before upload.
 
 Package smoke testing installs into an isolated temporary directory, checks the staged runtime and nested notices, then runs `--uninstall`. The lifecycle check must preserve a user-data marker while removing installer-managed files and the Resolve menu script. It never installs into the runner account's real Resolve directories.
 
 ## Remaining Limitations
 
-- All native artifacts are unsigned and restricted to short-lived private Actions storage.
-- No automated or tag-driven public release path exists.
+- Windows executables are not Authenticode-signed yet; SmartScreen may warn until signing is in place.
+- Releases are published only by a manual workflow run; there is no tag-driven release path.
+- The Linux canary is unpublished and restricted to short-lived private Actions storage.
 - macOS is unsupported, unbuilt, and outside the current release scope.
 - FFmpeg omits x86 assembly and optional codecs, which improves provenance and portability at the cost of performance and unsupported formats.
 - Hosted runner images can change under fixed labels, so complete bit-for-bit reproducibility across future image revisions is not claimed.

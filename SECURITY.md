@@ -12,4 +12,4 @@ Use GitHub private vulnerability reporting for `denprog5/resolve-track-visualize
 
 Include the affected version, operating system, Resolve version, reproduction steps, impact, and any suggested mitigation. Remove media, credentials, personal paths, and other sensitive data from logs.
 
-Unsigned preview artifacts and their checksums are described in [the release process](docs/releasing.md). A checksum confirms file integrity against the published value; it does not establish publisher identity in the way code signing does.
+Release artifacts and their checksums are described in [the release process](docs/releasing.md). Windows executables are not Authenticode-signed yet. A checksum confirms file integrity against the published value; it does not establish publisher identity in the way code signing does. Automatic updates are installed only when the release's `update.json` carries a valid Ed25519 signature from the project's update key and the installer matches its recorded size and SHA-256.

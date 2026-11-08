@@ -68,6 +68,7 @@ BOOL_KEYS = (
     "glass_enabled",
     "uppercase_artist",
     "time_bold",
+    "scroll_title",
 )
 INT_RANGES: dict[str, tuple[int, int]] = {
     "panel_alpha": (0, 255),
@@ -112,6 +113,7 @@ _COMMON_DEFAULTS: dict[str, Any] = {
     "glass_enabled": True,
     "uppercase_artist": False,
     "time_bold": False,
+    "scroll_title": True,
     "time_mode": "elapsed_total",
     "progress_basis": "track",
     "progress_style": "wave",

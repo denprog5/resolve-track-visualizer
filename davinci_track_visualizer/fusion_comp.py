@@ -9,6 +9,8 @@ draws everything from files the engine rendered:
   the card through a rectangle mask whose width follows playback.
 * ``Knob``   – an optional progress handle, moved horizontally by a Transform.
 * ``Time*``  – TextPlus readouts whose text is an expression of the composition time.
+* ``Title``  – optional: a title too long for its line, drawn twice on one strip and moved left
+  inside a window mask, so it scrolls in a seamless loop with a pause before each pass.
 
 Composition ``time`` 0 is the first frame of the timeline item. All animation uses
 expressions, so a one-hour clip costs the same as a ten-second one.
@@ -39,6 +41,35 @@ class TextSpec:
 
 
 @dataclass(frozen=True)
+class TitleScroll:
+    """A scrolling title strip. Coordinates are frame pixels, origin top-left.
+
+    The strip holds the title, a gap and the title again, so moving it left by ``cycle`` pixels
+    shows the same picture as at rest. Each pass waits ``pause`` seconds, then moves at ``speed``
+    pixels per second; only the part between ``window_left`` and ``window_right`` is visible.
+    """
+
+    left: float
+    top: float
+    width: int
+    height: int
+    window_left: float
+    window_right: float
+    cycle: float
+    speed: float
+    pause: float
+    path: str | None = None
+
+    @property
+    def period(self) -> float:
+        return self.pause + self.cycle / max(1e-6, self.speed)
+
+    def offset(self, seconds: float) -> float:
+        """Python twin of the Fusion expression: pixels the strip has moved at ``seconds``."""
+        return min(self.cycle, self.speed * max(0.0, (seconds % self.period) - self.pause))
+
+
+@dataclass(frozen=True)
 class CompSpec:
     width: int
     height: int
@@ -54,6 +85,7 @@ class CompSpec:
     offset_seconds: float = 0.0
     total_seconds: float = 1.0
     texts: tuple[TextSpec, ...] = field(default_factory=tuple)
+    title_scroll: TitleScroll | None = None
     # Pixel to em ratio Fusion uses for TextPlus ``Size`` (Size = em_px / width * factor).
     text_size_factor: float = 1.70
 
@@ -277,6 +309,38 @@ def build_comp(spec: CompSpec) -> str:
         writer.close("},")
         _merge(writer, "KnobMerge", current, "KnobMove", column * 110, 0)
         current = "KnobMerge"
+        column += 1
+
+    scroll = spec.title_scroll
+    if scroll is not None and scroll.path and scroll.window_right > scroll.window_left:
+        _loader(writer, "Title", scroll.path, column * 110, -66)
+        window_w = float(scroll.window_right) - float(scroll.window_left)
+        writer.open("TitleWindow = RectangleMask {")
+        writer.open("Inputs = {")
+        _input_value(writer, "UseFrameFormatSettings", 1)
+        _input_value(writer, "Height", 4)
+        _input_value(writer, "Width", window_w / width)
+        _input_value(writer, "Center", ((float(scroll.window_left) + window_w / 2) / width, 0.5))
+        writer.close("},")
+        _view(writer, column * 110, -132)
+        writer.close("},")
+        moved = (
+            f"math.min({_expr_number(scroll.cycle)}, {_expr_number(scroll.speed)} * "
+            f"math.max(0, ((time / {_expr_number(spec.fps)}) % {_expr_number(scroll.period)}) - {_expr_number(scroll.pause)}))"
+        )
+        centre_x = (float(scroll.left) + scroll.width / 2) / width
+        centre_y = 1.0 - (float(scroll.top) + scroll.height / 2) / height
+        writer.open("TitleMerge = Merge {")
+        writer.open("Inputs = {")
+        _input_link(writer, "Background", current)
+        _input_link(writer, "Foreground", "Title")
+        _input_value(writer, "PerformDepthMerge", 0)
+        _input_expression(writer, "Center", f"Point({_expr_number(centre_x)} - ({moved}) / {_expr_number(width)}, {_expr_number(centre_y)})")
+        _input_link(writer, "EffectMask", "TitleWindow", "Mask")
+        writer.close("},")
+        _view(writer, column * 110, 0)
+        writer.close("},")
+        current = "TitleMerge"
         column += 1
 
     for index, text in enumerate(spec.texts, start=1):

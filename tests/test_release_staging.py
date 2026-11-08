@@ -120,14 +120,15 @@ class ReleaseStagingTests(unittest.TestCase):
             source_offer = (stage / "licenses" / "FFMPEG_SOURCE_OFFER.txt").read_text(encoding="utf-8")
             self.assertIn("ffmpeg-9.0.1.tar.xz", source_offer)
             self.assertIn("9" * 64, source_offer)
-            self.assertIn("assembled private Actions artifact", source_offer)
+            self.assertIn("assembled release bundle", source_offer)
+            self.assertIn("GitHub Release of this version attaches it", source_offer)
             self.assertNotIn("publishes", source_offer)
             self.assertNotIn("zlib", source_offer.lower())
             mutagen_offer = (stage / "licenses" / "MUTAGEN_SOURCE_OFFER.txt").read_text(
                 encoding="utf-8"
             )
             self.assertIn("mutagen-1.47.0.tar.gz", mutagen_offer)
-            self.assertIn("assembled private Actions artifact", mutagen_offer)
+            self.assertIn("assembled release bundle", mutagen_offer)
             self.assertNotIn("publishes", mutagen_offer)
             self.assertIn(
                 "719fadef0a978c31b4cf3c956261b3c58b6948b32023078a2117b1de09f0fc99",

@@ -1,4 +1,4 @@
-name: Windows release candidate
+name: Windows release
 
 on:
   workflow_dispatch:
@@ -6,15 +6,20 @@ on:
       version:
         description: Version matching davinci_track_visualizer.__version__
         required: true
-        default: 0.1.0
+        default: 0.9.0
         type: string
+      publish:
+        description: Publish a GitHub Release with the signed update manifest
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build private Windows x64 release candidate
+    name: Build Windows x64 release
     permissions:
       actions: write
       contents: read
@@ -23,3 +28,65 @@ jobs:
       version: ${{ inputs.version }}
       target: windows-x64
       channel: release-candidate
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+
+      - name: Download assembled release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: resolve-track-visualizer-${{ inputs.version }}-release-candidate-windows-x64
+          path: release-bundle
+
+      - name: Verify release bundle checksums
+        working-directory: release-bundle
+        run: sha256sum -c SHA256SUMS
+
+      - name: Write signed update manifest
+        env:
+          TVIZ_UPDATE_SIGNING_KEY: ${{ secrets.TVIZ_UPDATE_SIGNING_KEY }}
+          VERSION: ${{ inputs.version }}
+        run: >-
+          python scripts/make_update_manifest.py
+          --installer "release-bundle/artifacts/TrackVisualizerSetup-${VERSION}-windows-x64.exe"
+          --version "$VERSION"
+          --out release-bundle/artifacts/update.json
+
+      - name: Extract release notes
+        env:
+          VERSION: ${{ inputs.version }}
+        run: python scripts/release_notes.py --version "$VERSION" --out release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          prerelease=()
+          if [[ "$VERSION" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "v${VERSION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Track Visualizer ${VERSION}" \
+            --notes-file release-notes.md \
+            "${prerelease[@]}" \
+            release-bundle/artifacts/* \
+            release-bundle/source/* \
+            release-bundle/SHA256SUMS

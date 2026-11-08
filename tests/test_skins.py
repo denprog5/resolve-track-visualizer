@@ -186,6 +186,34 @@ class GeometryTests(unittest.TestCase):
         self.assertLessEqual(bottom, limit + 1)
         self.assertLess(bottom - 100, free_bottom - 300)
 
+    def test_titles_too_long_for_their_line_scroll_in_every_skin(self) -> None:
+        long_info = TrackInfo(title="An Extremely Long Track Title (Extended Club Mix) [Some Label Recordings]", artist="Artist", cover_path=None)
+        for skin in SUPPORTED_SKINS:
+            layers = compose_player(long_info, sample_levels(32), default_design(skin), skin, 1920, 1080)
+            scroll = layers.title_scroll
+            self.assertIsNotNone(layers.title, skin)
+            assert scroll is not None
+            self.assertEqual(layers.title.size, (scroll.width, scroll.height), skin)
+            self.assertEqual((scroll.width % 2, scroll.height % 2), (0, 0), skin)
+            self.assertGreater(scroll.cycle, scroll.window_right - scroll.window_left, skin)
+            self.assertLessEqual(scroll.window_right, layers.bounds[0] + layers.bounds[2], skin)
+            at_rest = flatten_player(layers, 0.2, 10, 100, scroll_seconds=0)
+            moving = flatten_player(layers, 0.2, 10, 100, scroll_seconds=scroll.pause + 3)
+            looped = flatten_player(layers, 0.2, 10, 100, scroll_seconds=scroll.period)
+            self.assertNotEqual(at_rest.tobytes(), moving.tobytes(), skin)
+            self.assertEqual(at_rest.tobytes(), looped.tobytes(), skin)
+            # Nothing of the title is drawn outside its window: the column right of it never changes.
+            column = (int(scroll.window_right) + 1, int(scroll.top), int(scroll.window_right) + 3, int(scroll.top + scroll.height))
+            self.assertEqual(at_rest.crop(column).tobytes(), moving.crop(column).tobytes(), skin)
+
+    def test_short_titles_and_disabled_scrolling_stay_static(self) -> None:
+        short = compose_player(INFO, sample_levels(32), default_design("classic"), "classic", 1920, 1080)
+        self.assertIsNone(short.title)
+        long_info = TrackInfo(title="An Extremely Long Track Title (Extended Club Mix) [Some Label Recordings]", artist="Artist", cover_path=None)
+        static = compose_player(long_info, sample_levels(32), normalize_design({"scroll_title": False}, "classic"), "classic", 1920, 1080)
+        self.assertIsNone(static.title)
+        self.assertTrue(default_design("wave")["scroll_title"])
+
     def test_readouts_follow_time_modes(self) -> None:
         self.assertEqual(readout_text("elapsed_total", 65, 225), "01:05 / 03:45")
         self.assertEqual(readout_text("elapsed", 65, 225), "01:05")
